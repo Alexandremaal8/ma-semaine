@@ -132,7 +132,8 @@ function editCourse(id) {
 function editRoutine(id) {
   const r = state.routines.find(x => x.id === id) || { id: null, day: 5, start: 600, end: 660, title: '', kind: 'other' };
   openSheet(r.id ? 'Modifier la routine' : 'Nouvelle routine', `<div class="fields">
-    ${F.seg('kind', 'Type', [['sport', 'Sport'], ['other', 'Autre']], r.kind || 'other')}
+    ${F.seg('kind', 'Type', [['sport', 'Sport'], ['study', 'Étude fixe'], ['other', 'Autre']], r.kind || 'other')}
+    ${F.select('subj', 'Matière (si étude fixe)', subjOpts(), r.subj || (state.subjects[0] || {}).id)}
     ${F.text('title', 'Quoi', r.title, 'full', 'ex. Courses + lessive')}
     ${F.select('day', 'Jour', dayOpts, r.day)}
     ${F.time('start', 'Début', r.start)}${F.time('end', 'Fin', r.end)}
@@ -144,7 +145,7 @@ function editRoutine(id) {
       state.routines = others; return done();
     }
     const t = timesOk(fd); if (!t) return false;
-    const obj = { id: r.id || uid(), day: +fd.day, start: t[0], end: t[1], title: fd.title.trim() || (fd.kind === 'sport' ? 'Sport' : 'Routine'), kind: fd.kind === 'sport' ? 'sport' : 'other' };
+    const obj = { id: r.id || uid(), day: +fd.day, start: t[0], end: t[1], title: fd.title.trim() || (fd.kind === 'sport' ? 'Sport' : fd.kind === 'study' ? 'Étude' : 'Routine'), kind: ['sport', 'study'].includes(fd.kind) ? fd.kind : 'other', subj: fd.kind === 'study' ? fd.subj : '' };
     const total = sportOf(others.concat([obj]));
     if (total < L.SPORT_MIN || total > L.SPORT_MAX) { toast('Sport : ' + hm(total) + ' par semaine. Il faut entre 2h et 3h.'); return false; }
     if (r.id) Object.assign(r, obj); else state.routines.push(obj);
@@ -454,7 +455,7 @@ function renderWeek() {
     <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${s.serie ? 'Série ' + hm(s.serie) + (s.corr ? ' + correction ' + hm(s.corr) : '') : 'Pas de série'} · ${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
     <div class="sec-t">Routines<button type="button" data-act="editRoutine">+ Routine</button></div>
     ${(() => { const sp = L.sportMinutes(state); const ok = sp >= L.SPORT_MIN && sp <= L.SPORT_MAX; return `<p class="hint" style="margin:0 4px 8px;${ok ? '' : 'color:var(--warn);font-weight:650'}">Sport : ${hm(sp)} par semaine ${ok ? '(entre 2h et 3h, parfait)' : '· il faut entre 2h et 3h'}</p>`; })()}
-    <div class="group">${state.routines.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(r => `<button type="button" class="li" data-act="editRoutine" data-v="${r.id}" style="--c:${r.kind === 'sport' ? 'var(--ink)' : 'var(--faint)'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(r.title)}</span><span class="su">${DAYS[r.day]}${r.kind === 'sport' ? ' · sport' : ''}</span></span><span class="rt">${fmt(r.start)}<br>${fmt(r.end)}</span>${CHEV}</button>`).join('') || '<div class="empty">Aucune routine.</div>'}</div>`;
+    <div class="group">${state.routines.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(r => `<button type="button" class="li" data-act="editRoutine" data-v="${r.id}" style="--c:${r.kind === 'sport' ? 'var(--ink)' : 'var(--faint)'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(r.title)}</span><span class="su">${DAYS[r.day]}${r.kind === 'sport' ? ' · sport' : r.kind === 'study' ? ' · étude ' + esc((subjOf(state, r.subj) || {}).name || '') : ''}</span></span><span class="rt">${fmt(r.start)}<br>${fmt(r.end)}</span>${CHEV}</button>`).join('') || '<div class="empty">Aucune routine.</div>'}</div>`;
 }
 
 /* ---------- Réglages ---------- */
@@ -575,7 +576,7 @@ document.addEventListener('click', async e => {
         const days = L.generate(state, fromIso(wk)); let ev = null;
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
-        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie } : { k: ev.kind, m: ev.end - ev.start };
+        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, fx: !!ev.fixed } : { k: ev.kind, m: ev.end - ev.start };
         b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
       }
       save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;

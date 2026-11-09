@@ -62,3 +62,9 @@ console.log(bad?'FAIL '+bad:'OK');
 // 10. migration v4 → v5 Saturday laundry
 {const S=L.normalize({v:4,routines:[{id:'a',day:5,start:690,end:780,title:'Courses',kind:'other'},{id:'b',day:5,start:600,end:645,title:'Sport',kind:'sport'}]});console.log('samedi:',S.routines.filter(r=>r.day===5).map(r=>L.fmt(r.start)+' '+r.title).join(' / '));}
 console.log(bad?'FAIL '+bad:'OK');
+// 11. mock exam during exercises + Monday physics prep
+{const S=L.defaultState();S.since=0;S.mocks=[{id:'m',subj:'alg',date:'2026-11-13',start:495,end:555}];const d=L.generate(S,new Date(2026,10,9),new Date(2026,10,9,6,0));
+ d[4].ev.filter(e=>e.start<720&&e.end>480).forEach(e=>console.log('   ven',L.fmt(e.start),L.fmt(e.end),e.kind,e.title,'·',e.sub||''));
+ const pr=d[0].ev.find(e=>e.fixed);console.log('lundi prépa physique:',pr&&L.fmt(pr.start)+'-'+L.fmt(pr.end)+' '+pr.title+' · '+pr.sub);if(!pr)fail('no physics prep');
+ const v=L.normalize({v:5,subjects:[{id:'phy',name:'Physique (mécanique)'}],routines:[]});console.log('migration v6:',v.routines.filter(r=>r.kind==='study').length);}
+console.log(bad?'FAIL '+bad:'OK');

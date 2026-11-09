@@ -56,9 +56,9 @@ const subjOf = (S, id) => S.subjects.find(x => x.id === id);
 
 function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
-  const R = (day, s, e, title, kind) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other' });
+  const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 5, mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 6, mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -75,6 +75,7 @@ function defaultState() {
       C(4, 495, 600, 'alg', 'Exercices', ''), C(4, 615, 720, 'aicc', 'Exercices', ''), C(4, 795, 900, 'prog', 'Exercices', ''), C(4, 915, 960, 'prog', 'Cours', 'INF')
     ],
     routines: [
+      R(0, 910, 970, 'Revoir le cours d’avant + survoler celui d’aujourd’hui', 'study', 'phy'),
       R(1, 1035, 1095, 'Sport', 'sport'), R(3, 1050, 1110, 'Sport', 'sport'), R(5, 600, 645, 'Sport', 'sport'),
       R(5, 660, 765, 'Lessive + courses (lancer la machine, courses, ranger, étendre)'),
       R(6, 540, 780, 'Lessive, nettoyage, cuisine'),
@@ -111,6 +112,12 @@ function normalize(s) {
     if (old.coursesOn === false) out.noCourseWeeks = [iso(mondayOf(new Date()))];
     out.coursesOn = true;
   }
+  if ((old.v || 0) < 6) {
+    // v5 → v6: every Monday, 1h of physics prep before the 16:15 lecture
+    const has = (out.routines || []).some(r => r.kind === 'study' && r.day === 0);
+    const phy = (out.subjects || []).find(x => /phys/i.test(x.name)) || {};
+    if (!has && phy.id) out.routines = (out.routines || []).concat([{ id: uid(), day: 0, start: 910, end: 970, title: 'Revoir le cours d’avant + survoler celui d’aujourd’hui', kind: 'study', subj: phy.id }]);
+  }
   if ((old.v || 0) < 5) {
     // v4 → v5: Saturday is laundry #1 started before groceries (about 1h15 of laundry overall)
     out.routines = (out.routines || []).filter(r => !(r.day === 5 && r.kind !== 'sport' && /courses|lessive/i.test(r.title)));
@@ -125,7 +132,7 @@ function normalize(s) {
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
   if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
-  out.v = 5;
+  out.v = 6;
   return out;
 }
 
@@ -173,7 +180,18 @@ function layoutDay(S, m, weekStart, d) {
     return { d, date, dIso, we, off: !light, trip: tr.trip, tripEdge: tr.edge, wake, sleep, wind: sleep - 30, eveStart: sleep - 30, ev: [], courses: [], firstC: null, goHome: null, gaps, extGaps: [], chunk, cap: light };
   }
   const off = (S.offDays || []).includes(dIso);
-  const courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start).sort((a, b) => a.start - b.start) : [];
+  const dayMocks = (S.mocks || []).filter(x => x.date === dIso && x.end > x.start);
+  let courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start).map(c => Object.assign({}, c)) : [];
+  for (const mk of dayMocks) {
+    courses = courses.flatMap(c => {
+      if (mk.end <= c.start || mk.start >= c.end) return [c];
+      const parts = [];
+      if (mk.start - c.start >= 15) parts.push(Object.assign({}, c, { end: mk.start }));
+      if (c.end - mk.end >= 15) parts.push(Object.assign({}, c, { id: c.id + '-b', start: mk.end, afterMock: true }));
+      return parts;
+    });
+  }
+  courses.sort((a, b) => a.start - b.start);
   const firstC = courses.length ? courses[0].start : null;
   const lastC = courses.length ? Math.max(...courses.map(c => c.end)) : null;
   const wake = firstC != null ? Math.min(we ? S.wakeWE : S.wake, firstC - 30 - COMMUTE - 15) : (we ? S.wakeWE : S.wake);
@@ -182,10 +200,14 @@ function layoutDay(S, m, weekStart, d) {
   const busy = () => ev.filter(e => e.end > e.start);
   const free = (s, e) => busy().every(b => b.end <= s || b.start >= e);
   ev.push({ kind: 'meal', start: wake, end: wake + 30, title: 'Petit-déj' });
-  courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type, c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
+  courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
-  (S.mocks || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
-  (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r => { if (free(r.start, r.end)) ev.push({ kind: r.kind === 'sport' ? 'sport' : 'routine', start: r.start, end: r.end, title: r.title, rid: r.id }); });
+  dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
+  (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r => {
+    if (!free(r.start, r.end)) return;
+    if (r.kind === 'study') { if (!S.coursesOn || !subjOf(S, r.subj)) return; ev.push({ kind: 'fixed', start: r.start, end: r.end, title: r.title, subj: r.subj, rid: r.id }); }
+    else ev.push({ kind: r.kind === 'sport' ? 'sport' : 'routine', start: r.start, end: r.end, title: r.title, rid: r.id });
+  });
   let goHome = null;
   if (courses.length) {
     if (free(firstC - COMMUTE - 5, firstC - 5)) ev.push({ kind: 'move', start: firstC - COMMUTE - 5, end: firstC - 5, title: 'Maison → EPFL' });
@@ -244,7 +266,7 @@ function examWeight(S, su, date) {
 }
 function doneBySubject(S, key) {
   const out = {}; let total = 0;
-  for (const v of Object.values(S.done[key] || {})) if (v && typeof v === 'object' && v.m) { out[v.s || '_'] = (out[v.s || '_'] || 0) + v.m; total += v.m; }
+  for (const v of Object.values(S.done[key] || {})) if (v && typeof v === 'object' && v.m && !v.fx) { out[v.s || '_'] = (out[v.s || '_'] || 0) + v.m; total += v.m; }
   return { by: out, total };
 }
 /* Séries from last week that were never finished. Only counts if the app was used that week. */
@@ -404,6 +426,17 @@ function generate(S0, weekStart, now) {
   const idOf = (d, s) => d + '-' + s.start + '-study';
   const future = [], live = [];
   let lateMin = 0;
+  for (const x of days) for (const e of x.ev) {
+    if (e.kind !== 'fixed') continue;
+    const id = idOf(x.d, e), rec = doneMap[id], len = e.end - e.start;
+    const startT = x.date.getTime() + e.start * 6e4, endT = x.date.getTime() + e.end * 6e4;
+    e.kind = 'study'; e.id = id; e.fixed = true; e.len = len;
+    const su = subjOf(S, e.subj); e.sub = (su ? su.name : '') + ' · tous les ' + DAYS[x.d].toLowerCase() + 's';
+    if (rec && typeof rec === 'object') e.state = 'done';
+    else if (endT <= nowT) { e.state = endT <= sinceT ? 'pre' : 'missed'; }
+    else e.state = 'todo';
+    revLeft[e.subj] = Math.max(0, (revLeft[e.subj] || 0) - len);
+  }
   for (const f of frozen) {
     const id = idOf(f.d, f), rec = doneMap[id];
     if (rec && typeof rec === 'object') live.push(Object.assign({}, f, { id, title: rec.t || f.title, subj: rec.s, state: 'done' }));
@@ -594,7 +627,7 @@ function freezePast(S, now) {
   if (now.getTime() <= ws.getTime() + 60e3) return;
   const days = generate(S, ws, now);
   const items = [];
-  for (const x of days) for (const e of x.ev) if (e.kind === 'study' && x.date.getTime() + e.start * 6e4 < now.getTime())
+  for (const x of days) for (const e of x.ev) if (e.kind === 'study' && !e.fixed && x.date.getTime() + e.start * 6e4 < now.getTime())
     items.push({ d: x.d, start: e.start, end: e.end, title: e.title, subj: e.subj, serie: e.serie, late: e.late, catchup: e.catchup, campus: /EPFL/.test(e.sub || '') });
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
