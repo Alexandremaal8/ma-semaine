@@ -33,7 +33,7 @@ jobs:
       - name: Préparer Cloudflare (compte, sous-domaine, stockage)
         id: cf
         env:
-          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFARE_API_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${CF}" ]; then echo "::error::Le secret CLOUDFLARE_API_TOKEN est manquant (Settings > Secrets and variables > Actions)"; exit 1; fi
@@ -59,7 +59,7 @@ jobs:
       - name: Déployer le serveur de notifs
         working-directory: worker
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.cf.outputs.acc }}
         run: npx --yes wrangler@4 deploy
 
