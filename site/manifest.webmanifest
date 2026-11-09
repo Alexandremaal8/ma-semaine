@@ -1,6 +1,6 @@
 {
-  "name": "Ma semaine EPFL",
-  "short_name": "Ma semaine",
+  "name": "EPFL Calendar",
+  "short_name": "EPFL Calendar",
   "lang": "fr",
   "start_url": "./",
   "scope": "./",

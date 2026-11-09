@@ -280,7 +280,7 @@ function renderSet() {
   let status;
   if (isIOS && !standalone()) status = `<div class="status bad"><span class="pill">À faire</span><div>Pour recevoir des notifs, installe l’app :<ol class="steps"><li>Ouvre cette page dans <b>Safari</b></li><li>Touche <b>Partager</b> (carré avec flèche)</li><li><b>Sur l’écran d’accueil</b> → Ajouter</li><li>Ouvre l’app depuis l’icône et reviens ici</li></ol></div></div>`;
   else if (!WORKER) status = `<div class="status bad"><span class="pill">Serveur</span><div>Le serveur de notifs n’est pas encore en ligne.</div></div>`;
-  else if (perm === 'denied') status = `<div class="status bad"><span class="pill">Bloquées</span><div>Les notifs sont bloquées. Réactive-les dans Réglages iPhone → Notifications → Ma semaine.</div></div>`;
+  else if (perm === 'denied') status = `<div class="status bad"><span class="pill">Bloquées</span><div>Les notifs sont bloquées. Réactive-les dans Réglages iPhone → Notifications → EPFL Calendar.</div></div>`;
   else if (N.on) status = `<div class="status ok"><span class="pill">Actives</span><div>${sync ? sync.n + ' notifs programmées pour les 14 prochains jours. Dernière mise à jour ' + new Date(sync.t).toLocaleString('fr-CH', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) + '.' : 'En attente de synchronisation.'} Ouvre l’app au moins une fois par semaine pour que ça continue.</div></div>`;
   else status = `<div class="status"><span class="pill">Coupées</span><div>Active-les pour recevoir tes rappels de cours, de blocs d’étude et de deadlines.</div></div>`;
   const T = (f, label, sub) => `<label class="toggle"><input type="checkbox" data-nf="${f}" ${N[f] ? 'checked' : ''}><span>${label}${sub ? `<small>${sub}</small>` : ''}</span></label>`;

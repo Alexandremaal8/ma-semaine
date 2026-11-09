@@ -89,7 +89,7 @@ async function handle(req, env) {
     return json({ ok: true, id, count: notifications.length });
   }
   if (url.pathname === '/test') {
-    const status = await sendPush(env, data.subscription, { title: 'Ça marche !', body: 'Les notifs de Ma semaine EPFL sont activées.', tag: 'test' });
+    const status = await sendPush(env, data.subscription, { title: 'Ça marche !', body: 'Les notifs d’EPFL Calendar sont activées.', tag: 'test' });
     return json({ ok: status >= 200 && status < 300, status });
   }
   if (url.pathname === '/unsubscribe') {
