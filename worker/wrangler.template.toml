@@ -1,0 +1,14 @@
+name = "ma-semaine-notifs"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "KV"
+id = "__KV_ID__"
+
+[vars]
+VAPID_SUBJECT = "https://alexandremaal8.github.io/ma-semaine/"

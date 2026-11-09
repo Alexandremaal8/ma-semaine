@@ -1,0 +1,79 @@
+name: Déployer l'app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Vérifier la logique du planning
+        run: node test/logic.test.js | tail -1 | grep -q OK
+
+      - name: Préparer Cloudflare (compte, sous-domaine, stockage)
+        id: cf
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CF}" ]; then echo "::error::Le secret CLOUDFLARE_API_TOKEN est manquant (Settings > Secrets and variables > Actions)"; exit 1; fi
+          api() { curl -sS -H "Authorization: Bearer ${CF}" -H "Content-Type: application/json" "$@"; }
+          ACC=$(api https://api.cloudflare.com/client/v4/accounts | jq -r '.result[0].id // empty')
+          if [ -z "${ACC}" ]; then echo "::error::La clé Cloudflare ne donne accès à aucun compte. Recrée-la avec le modèle 'Edit Cloudflare Workers'."; exit 1; fi
+          SUB=$(api "https://api.cloudflare.com/client/v4/accounts/${ACC}/workers/subdomain" | jq -r '.result.subdomain // empty')
+          if [ -z "${SUB}" ]; then
+            OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+            SUB="${OWNER}"
+            api -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACC}/workers/subdomain" -d "{\"subdomain\":\"${SUB}\"}" | jq -e '.success' >/dev/null \
+              || { SUB="${OWNER}-${RANDOM}"; api -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACC}/workers/subdomain" -d "{\"subdomain\":\"${SUB}\"}" | jq -e '.success' >/dev/null; }
+          fi
+          KV=$(api "https://api.cloudflare.com/client/v4/accounts/${ACC}/storage/kv/namespaces?per_page=100" | jq -r '.result[]? | select(.title=="ma-semaine-kv") | .id' | head -1)
+          if [ -z "${KV}" ]; then
+            KV=$(api -X POST "https://api.cloudflare.com/client/v4/accounts/${ACC}/storage/kv/namespaces" -d '{"title":"ma-semaine-kv"}' | jq -r '.result.id // empty')
+          fi
+          if [ -z "${KV}" ]; then echo "::error::Impossible de créer le stockage KV"; exit 1; fi
+          sed "s/__KV_ID__/${KV}/" worker/wrangler.template.toml > worker/wrangler.toml
+          echo "acc=${ACC}" >> "$GITHUB_OUTPUT"
+          echo "url=https://ma-semaine-notifs.${SUB}.workers.dev" >> "$GITHUB_OUTPUT"
+
+      - name: Déployer le serveur de notifs
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.cf.outputs.acc }}
+        run: npx --yes wrangler@4 deploy
+
+      - name: Brancher l'app sur le serveur
+        run: |
+          V="${GITHUB_SHA::7}"
+          printf "self.WORKER_URL='%s';self.APP_VERSION='%s';\n" "${{ steps.cf.outputs.url }}" "$V" > site/config.js
+          sed -i "s/__VERSION__/${V}/g" site/sw.js site/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: pages
+        uses: actions/deploy-pages@v4
