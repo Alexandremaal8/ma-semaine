@@ -254,15 +254,25 @@ function editTrip(id, date) {
     calSel = obj.from; toast('Voyage ajouté. Ajoute tes dates d’examen pour que l’app prépare le retour.'); return done();
   });
 }
+function autoLine(wk) {
+  const r = L.recommendMode(state, fromIso(wk));
+  return r ? `${MODE_META[r.mode].name} · ${esc(r.why)}` : `ton mode habituel (${MODE_META[state.mode].name})`;
+}
 function modeSheet(wk) {
   wk = wk || wkOf(selDate);
-  const cfg = cfgOf(wk), rec = L.recommendMode(state, fromIso(wk));
+  const cfg = cfgOf(wk), manual = cfg.source === 'manual', noExam = !state.subjects.some(su => su.exam);
   openSheet('Semaine du ' + dateLbl(fromIso(wk)), `
-    ${rec ? `<div class="rec"><b>Conseil : mode ${MODE_META[rec.mode].name}.</b> ${esc(rec.why)}</div>` : ''}
     <div class="group" style="margin-bottom:12px"><label class="row-sw"><span class="bd"><span class="ti">J’ai cours cette semaine</span><span class="su">Sinon : semaine de travail sans cours, ni séries</span></span><input type="checkbox" class="sw" data-courses="${wk}" ${cfg.coursesOn ? 'checked' : ''}${cfg.tripDays >= 3 ? ' disabled' : ''}></label></div>
-    <div class="modes" role="radiogroup">${MODE_ORDER.map(k => `<button type="button" class="mopt" role="radio" aria-checked="${k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}${rec && rec.mode === k ? ' <em class="badge">conseillé</em>' : ''}</b><small>${esc(MODE_META[k].tag)}</small></span></button>`).join('')}</div>
+    <div class="modes" role="radiogroup">
+      <button type="button" class="mopt" role="radio" aria-checked="${!manual}" data-act="setMode" data-v="auto" data-w="${wk}" style="--m:var(--ink)"><span class="sw8"></span><span><b>Automatique <em class="badge" style="--m:var(--ink)">conseillé</em></b><small>L’app choisit pour toi : ${autoLine(wk)}. Elle passe aussi en Rattrapage toute seule si le retard ne rentre plus.</small></span></button>
+      ${MODE_ORDER.map(k => `<button type="button" class="mopt" role="radio" aria-checked="${manual && k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}</b><small>${esc(MODE_META[k].tag)}${k === 'exam' && noExam ? ' <b style="display:inline;color:var(--warn)">Ajoute d’abord tes dates d’examen.</b>' : ''}</small></span></button>`).join('')}
+    </div>
     <div class="day-actions"><button type="button" class="linkbtn" data-act="weekendOff" data-v="${wk}">${state.offDays.includes(iso(addDays(fromIso(wk), 5))) && state.offDays.includes(iso(addDays(fromIso(wk), 6))) ? 'Annuler le week-end off' : 'Prendre le week-end off'}</button><button type="button" class="linkbtn" data-act="tuneMode" data-v="${cfg.mode}">Ajuster le mode ${esc(MODE_META[cfg.mode].name)}</button></div>
     <p class="hint" style="text-align:center;margin-top:12px">Tu peux changer en pleine semaine : ce qui est passé ne bouge pas, seul ce qui reste s’adapte.</p>`);
+}
+function baseModeSheet() {
+  openSheet('Mode habituel', `<p class="hint" style="margin:-4px 0 12px;padding:0">Le mode des semaines « normales », quand rien de spécial n’arrive (pas d’examen proche, pas de voyage, pas de retard).</p>
+    <div class="modes">${['chill', 'normal', 'charbon'].map(k => `<button type="button" class="mopt" aria-checked="${state.mode === k}" data-act="setBase" data-v="${k}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}</b><small>${esc(MODE_META[k].tag)}</small></span></button>`).join('')}</div>`);
 }
 function tuneMode(mk) {
   mk = MODE_ORDER.includes(mk) ? mk : cfgOf(wkOf(selDate)).mode;
@@ -317,7 +327,22 @@ function weekSheet() {
     <div class="sec-t" style="margin-top:20px">Par matière</div>
     <div class="group" style="padding:2px 14px">${state.subjects.map(s => { const p = sm.per[s.id] || { plan: 0, done: 0 }; return `<div class="subrow" style="--c:${esc(s.color)}"><span>${esc(s.name)}</span><span class="num">${p.done ? hm(p.done) : '0'} / ${hm(p.plan)}</span><span class="bar"><b style="width:${p.plan / max * 100}%"></b><i style="width:${p.done / max * 100}%"></i></span></div>`; }).join('')}</div>`);
 }
-function done() { save(); renderAll(); endChange(); return true; }
+function done() { save(); renderAll(); endChange(); setTimeout(autoCheck, 50); return true; }
+/* Too much late work for this week's mode → switch what's left of the week to Rattrapage (unless you chose the mode yourself) */
+function autoCheck() {
+  if (state.autoMode === false) return;
+  const ws = mondayOf(new Date()), key = iso(ws);
+  const days = L.generate(state, ws), c = days.meta.cfg;
+  if (c.source === 'manual' || ['rattrapage', 'charbon', 'exam', 'recup'].includes(c.mode)) return;
+  const M = days.meta;
+  // switch when the séries no longer fit, or when 4h+ of this week's blocks were not done
+  if (M.mustLeftAfter < 60 && M.lateMin < 240) return;
+  const why = M.mustLeftAfter >= 60 ? hm(M.mustLeftAfter) + ' de séries ne rentraient plus' : hm(M.lateMin) + ' pas faits cette semaine';
+  beginChange();
+  state.autoModes[key] = { mode: 'rattrapage', why };
+  save(); renderAll();
+  endChange('Mode Rattrapage activé automatiquement', why);
+}
 
 /* ---------- "Emploi du temps modifié" ---------- */
 let pendingSig = null;
@@ -334,7 +359,7 @@ function planSig() {
   return { blocks, mins };
 }
 function beginChange() { L.freezePast(state); pendingSig = planSig(); }
-function endChange() {
+function endChange(title, lead) {
   if (!pendingSig) return;
   const a = pendingSig, b = planSig(); pendingSig = null;
   let added = 0, removed = 0;
@@ -347,7 +372,7 @@ function endChange() {
     .map(([k, d]) => { const dt = fromIso(k); return `${DAYS[dow(dt)].toLowerCase()} ${dt.getDate()} ${d > 0 ? '+' : '−'}${hm(Math.abs(d))}`; });
   const detail = moved ? `${moved} bloc${moved > 1 ? 's' : ''} réorganisé${moved > 1 ? 's' : ''}${deltas.length ? ' · ' + deltas.join(', ') : ''}` : 'Rien à déplacer, tout tient déjà.';
   const el = $('#upd');
-  el.innerHTML = `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span><b>Emploi du temps modifié</b><small>${esc(detail)}</small></span>`;
+  el.innerHTML = `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span><b>${esc(title || 'Emploi du temps modifié')}</b><small>${esc((lead ? lead + ' · ' : '') + detail)}</small></span>`;
   el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
   clearTimeout(endChange._t); endChange._t = setTimeout(() => el.classList.remove('on'), 3800);
 }
@@ -365,7 +390,7 @@ function renderToday() {
   const we = addDays(ws, 6);
   $('#tEyebrow').textContent = isToday ? 'Aujourd’hui' : (Math.abs(sel - fromIso(todayIso())) === 864e5 ? (sel > fromIso(todayIso()) ? 'Demain' : 'Hier') : 'Semaine du ' + ws.getDate() + (ws.getMonth() !== we.getMonth() ? ' ' + MONTHS[ws.getMonth()] : '') + ' au ' + dateLbl(we));
   $('#tTitle').textContent = DAYS[dow(sel)] + ' ' + sel.getDate() + ' ' + MONTHS[sel.getMonth()];
-  $('#modePill').innerHTML = `<span class="dot"></span>${MODE_META[wmode].name}${days.meta.cfg.coursesOn ? '' : ' · sans cours'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`;
+  $('#modePill').innerHTML = `<span class="dot"></span>${MODE_META[wmode].name}${days.meta.cfg.coursesOn ? '' : ' · sans cours'}${days.meta.cfg.source === 'auto' ? '<small class="autotag">auto</small>' : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`;
   $('#strip').innerHTML = `<button type="button" class="arr" data-act="wk" data-v="-7" aria-label="Semaine précédente">‹</button><div class="days" role="tablist">${days.map(d => {
     const di = iso(d.date);
     return `<button type="button" role="tab" class="sd${di === todayIso() ? ' today' : ''}" aria-selected="${di === selDate}" data-act="pick" data-v="${di}"><span class="l">${DAYS_S[d.d]}</span><span class="n">${d.date.getDate()}</span><span class="p"><i style="width:${d.plan ? d.dn / d.plan * 100 : 0}%"></i></span></button>`;
@@ -388,30 +413,25 @@ function renderToday() {
   let late = '';
   const thisWeek = iso(mondayOf(new Date())) === key;
   if (thisWeek && M.mustLeftAfter >= 15) late = `<div class="notice warn"><span><b>${hm(M.mustLeftAfter)} de séries ne rentrent plus</b> cette semaine.${wmode !== 'rattrapage' ? ' Le mode Rattrapage peut t’aider.' : ' Elles passeront à la semaine prochaine.'}</span>${wmode !== 'rattrapage' ? `<button type="button" data-act="setMode" data-v="rattrapage" data-w="${key}">Rattrapage</button>` : ''}</div>`;
-  // weekly check-in: Sunday evening for next week, or Monday if this week's mode was never chosen
+  // weekly check-in: Sunday evening, for next week
   let pickWeek = '';
-  if (isToday) {
-    const dw = dow(now);
-    const target = dw === 6 && now.getHours() >= 16 ? iso(addDays(ws, 7)) : (dw <= 1 && !M.cfg.chosen ? key : null);
-    if (target) {
-      const tc = cfgOf(target), rec = L.recommendMode(state, fromIso(target));
-      const chosen = tc.chosen;
-      pickWeek = `<div class="pickweek"><div class="k">${target === key ? 'Cette semaine' : 'Semaine prochaine'} · du ${dateLbl(fromIso(target))}</div>
-        <b>${chosen ? 'Mode ' + MODE_META[tc.mode].name + ' choisi ✓' : 'Quel mode tu veux ?'}</b>
-        ${rec ? `<p>Conseil : <b>${MODE_META[rec.mode].name}</b>. ${esc(rec.why)}</p>` : ''}
-        <div class="chipsel">${MODE_ORDER.map(k => `<button type="button" class="chipm${tc.mode === k && chosen ? ' on' : ''}${rec && rec.mode === k ? ' rec' : ''}" data-act="setMode" data-v="${k}" data-w="${target}" style="--m:${MODE_COLORS[k]}">${MODE_META[k].name}</button>`).join('')}</div>
-        <label class="row-sw" style="padding:10px 0 0;border:0"><span class="bd"><span class="ti">J’ai cours cette semaine-là</span></span><input type="checkbox" class="sw" data-courses="${target}" ${tc.coursesOn ? 'checked' : ''}${tc.tripDays >= 3 ? ' disabled' : ''}></label></div>`;
+  if (isToday && dow(now) === 6 && now.getHours() >= 16) {
+    const target = iso(addDays(ws, 7));
+    if (!(state.weekSeen || {})[target]) {
+      const tc = cfgOf(target);
+      pickWeek = `<div class="pickweek"><div class="k">Semaine prochaine · du ${dateLbl(fromIso(target))}</div>
+        <b>Mode ${MODE_META[tc.mode].name}${tc.coursesOn ? '' : ', sans cours'}</b>
+        <p>${tc.source === 'manual' ? 'Choisi par toi.' : tc.source === 'auto' ? 'Choisi automatiquement : ' + esc(tc.why) + '.' : 'Ton mode habituel.'}</p>
+        <div class="chipsel"><button type="button" class="chipm on" data-act="weekOk" data-v="${target}" style="--m:var(--accent)">C’est bon</button><button type="button" class="chipm" data-act="modeSheet" data-w="${target}" style="--m:var(--ink)">Changer</button></div></div>`;
     }
   }
-  // advice before a trip or after it (once per week, only if the current mode differs)
   let advice = '';
   if (thisWeek && M.mustAllDone && !pickWeek) {
     const weOff = state.offDays.includes(iso(addDays(ws, 5))) && state.offDays.includes(iso(addDays(ws, 6)));
     advice = `<div class="notice"><span><b>Toutes tes séries de la semaine sont faites.</b> Tu peux continuer, ou lever le pied.</span>${wmode !== 'chill' ? `<button type="button" data-act="setMode" data-v="chill" data-w="${key}">Chill</button>` : ''}${weOff ? '' : `<button type="button" data-act="weekendOff" data-v="${key}">Week-end off</button>`}</div>`;
+  } else if (thisWeek && M.cfg.source === 'auto' && M.cfg.why && !pickWeek) {
+    advice = `<div class="notice"><span><b>Mode ${MODE_META[wmode].name} automatique.</b> ${esc(M.cfg.why)}.</span><button type="button" data-act="modeSheet" data-w="${key}">Changer</button></div>`;
   }
-  const recNow = thisWeek ? L.recommendMode(state, ws) : null;
-  if (recNow && recNow.mode !== wmode && !pickWeek && !advice) advice = `<div class="notice"><span><b>Conseil : mode ${MODE_META[recNow.mode].name}.</b> ${esc(recNow.why)}</span><button type="button" data-act="setMode" data-v="${recNow.mode}" data-w="${key}">Passer</button></div>`;
-  else if (thisWeek && M.lateMin >= 15) late = `<div class="notice"><span><b>${hm(M.lateMin)} pas faits</b> cette semaine : c’est déjà replacé${M.extended ? ', avec ' + hm(M.extended) + ' de rattrapage' : ''}.</span></div>`;
   const st = main.filter(e => e.kind === 'study'), stDone = st.filter(e => e.state === 'done');
   const prog = st.length ? `<div class="prog"><span><b>${stDone.length}/${st.length}</b> blocs</span><span class="track"><i style="width:${stDone.length / st.length * 100}%"></i></span><span class="num">${hm(day.dn)} / ${hm(day.plan)}</span></div>` : '';
   const notice = !state.notif.on && isToday ? `<div class="notice"><span>Les rappels sont coupés.</span><button type="button" data-act="goSet">Activer</button></div>` : '';
@@ -516,8 +536,11 @@ function renderSet() {
     <div class="sec-t">Horaires</div>
     <div class="group"><button type="button" class="li" data-act="hoursSheet"><span class="bd"><span class="ti">Réveil ${fmt(state.wake)} · coucher ${fmt(state.sleep)}</span><span class="su">Du lundi au vendredi, dans tous les modes</span></span>${CHEV}</button></div>
     <div class="sec-t">Mode</div>
-    ${(() => { const c = cfgOf(iso(mondayOf(new Date()))); return `<div class="group"><button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">Mode de cette semaine · changer</span></span>${CHEV}</button>
-      <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span>`; })()}<span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>
+    ${(() => { const c = cfgOf(iso(mondayOf(new Date()))); return `<div class="group">
+      <label class="row-sw"><span class="bd"><span class="ti">Choix automatique du mode</span><span class="su">Avance avant un voyage, Exam avant les examens, Rattrapage si le retard ne rentre plus</span></span><input type="checkbox" class="sw" data-auto="1" ${state.autoMode !== false ? 'checked' : ''}></label>
+      <button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">Cette semaine : ${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">${c.source === 'manual' ? 'Choisi par toi' : c.source === 'auto' ? 'Automatique · ' + esc(c.why) : 'Mode habituel'}</span></span>${CHEV}</button>
+      <button type="button" class="li" data-act="baseModeSheet"><span class="bd"><span class="ti">Mode habituel : ${MODE_META[state.mode].name}</span><span class="su">Pour les semaines sans rien de spécial</span></span>${CHEV}</button>
+      <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>`; })()}
     <div class="sec-t">Widget</div>
     <div class="group"><button type="button" class="li" data-act="widgetSheet"><span class="bd"><span class="ti">Widget pour l’écran d’accueil</span><span class="su">Ton programme sans ouvrir l’app</span></span>${CHEV}</button></div>
     <div class="sec-t">Sauvegarde</div>
@@ -618,7 +641,12 @@ document.addEventListener('click', async e => {
     case 'weekendOff': weekendOff(v); closeSheet(); return;
     case 'hoursSheet': hoursSheet(); return;
     case 'modeSheet': modeSheet(b.dataset.w); return;
-    case 'setMode': { const wk = b.dataset.w || wkOf(selDate); state.weekModes[wk] = v; if (wk >= iso(mondayOf(new Date()))) state.mode = v; save(); renderAll(); closeSheet(); if (wk >= iso(mondayOf(new Date())) && wk <= iso(addDays(mondayOf(new Date()), 7))) endChange(); else { pendingSig = null; toast('Mode ' + MODE_META[v].name + ' pour la semaine du ' + dateLbl(fromIso(wk))); } return; }
+    case 'baseModeSheet': baseModeSheet(); return;
+    case 'setBase': beginChange(); state.mode = v; closeSheet(); done(); return;
+    case 'weekOk': state.weekSeen = state.weekSeen || {}; state.weekSeen[v] = 1; save(); renderToday(); return;
+    case 'setMode': { const wk = b.dataset.w || wkOf(selDate);
+      if (v === 'auto') { delete state.weekModes[wk]; } else { state.weekModes[wk] = v; if (v === 'exam' && !state.subjects.some(su => su.exam)) setTimeout(() => toast('Ajoute tes dates d’examen pour que le mode Exam sache quoi prioriser'), 4200); }
+      state.weekSeen = state.weekSeen || {}; state.weekSeen[wk] = 1; save(); renderAll(); closeSheet(); if (wk >= iso(mondayOf(new Date())) && wk <= iso(addDays(mondayOf(new Date()), 7))) endChange(); else { pendingSig = null; toast((v === 'auto' ? 'Mode automatique' : 'Mode ' + MODE_META[v].name) + ' pour la semaine du ' + dateLbl(fromIso(wk))); } return; }
     case 'tuneMode': tuneMode(v); return;
     case 'newMock': editMock(null, calSel); return;
     case 'editMock': editMock(v); return;
@@ -649,10 +677,10 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.courses) beginChange();
+  if (t.dataset.auto) { beginChange(); state.autoMode = t.checked; if (!t.checked) state.autoModes = {}; done(); return; }
   if (t.dataset.courses) {
     const wk = t.dataset.courses; state.noCourseWeeks = state.noCourseWeeks.filter(x => x !== wk);
     if (!t.checked) state.noCourseWeeks.push(wk);
-    if (!state.weekModes[wk]) state.weekModes[wk] = cfgOf(wk).mode;
     save(); renderToday(); renderSet(); endChange(); return;
   }
   if (t.dataset.nf) { if (t.dataset.nf === 'sport') { state.notif.sport = state.notif.routine = t.checked; state.notif.event = t.checked ? 15 : 0; } else if (t.dataset.nf === 'morning') { state.notif.morning = state.notif.evening = t.checked; } else state.notif[t.dataset.nf] = t.checked; save(); return; }
@@ -675,7 +703,9 @@ document.addEventListener('pointerdown', e => {
 renderAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => r.update().catch(() => { })).catch(e => console.warn('sw', e));
 syncAll();
+setTimeout(autoCheck, 800);
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') setTimeout(autoCheck, 300);
   if (document.visibilityState !== 'visible') return;
   if (tab === 'today') keepScroll(renderToday);
   syncAll();

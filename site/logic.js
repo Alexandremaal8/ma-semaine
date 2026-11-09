@@ -58,7 +58,7 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 6, mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 7, mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -81,7 +81,7 @@ function defaultState() {
       R(6, 540, 780, 'Lessive, nettoyage, cuisine'),
       R(6, 1215, 1260, 'Préparer la semaine (sac, lunch, cours de lundi)')
     ],
-    events: [], offDays: [], trips: [], mocks: [], weekModes: {}, noCourseWeeks: [],
+    events: [], offDays: [], trips: [], mocks: [], weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
     modes: clone(MODE_DEFAULTS),
     notif: { on: false, course: 10, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
     done: {}
@@ -112,6 +112,11 @@ function normalize(s) {
     if (old.coursesOn === false) out.noCourseWeeks = [iso(mondayOf(new Date()))];
     out.coursesOn = true;
   }
+  if ((old.v || 0) < 7) {
+    // v6 → v7: the app picks modes by itself; S.mode becomes your usual mode
+    out.autoMode = true;
+    if (!['chill', 'normal', 'charbon'].includes(out.mode)) out.mode = 'normal';
+  }
   if ((old.v || 0) < 6) {
     // v5 → v6: every Monday, 1h of physics prep before the 16:15 lecture
     const has = (out.routines || []).some(r => r.kind === 'study' && r.day === 0);
@@ -131,8 +136,9 @@ function normalize(s) {
   ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
   if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
+  if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
-  out.v = 6;
+  out.v = 7;
   return out;
 }
 
@@ -141,29 +147,42 @@ function tripOn(S, dIso) {
   for (const t of S.trips || []) if (t.from && t.to && dIso >= t.from && dIso <= t.to) return { trip: t, edge: dIso === t.from || dIso === t.to };
   return null;
 }
-function weekCfg(S, weekStart) {
-  const key = iso(weekStart);
-  let tripDays = 0; for (let d = 0; d < 7; d++) if (tripOn(S, iso(addDays(weekStart, d)))) tripDays++;
-  const mode = MODE_ORDER.includes((S.weekModes || {})[key]) ? S.weekModes[key] : S.mode;
-  const coursesOn = !(S.noCourseWeeks || []).includes(key) && tripDays < 3;
-  return { key, mode, coursesOn, tripDays, chosen: !!(S.weekModes || {})[key] };
-}
-/* a suggestion for a given week, with the reason */
+function tripDaysIn(S, weekStart) { let n = 0; for (let d = 0; d < 7; d++) if (tripOn(S, iso(addDays(weekStart, d)))) n++; return n; }
+function coursesOnFor(S, weekStart) { return !(S.noCourseWeeks || []).includes(iso(weekStart)) && tripDaysIn(S, weekStart) < 3; }
+const examsWithin = (S, from, days) => S.subjects.filter(su => su.exam && (fromIso(su.exam) - from) / 864e5 >= 0 && (fromIso(su.exam) - from) / 864e5 < days);
+
+/* What the app would pick by itself for a week, with the reason. Order matters: exams first, then trips, then backlog. */
 function recommendMode(S, weekStart) {
   const end = addDays(weekStart, 7);
+  const soon = examsWithin(S, weekStart, 21);
+  if (soon.length) return { mode: 'exam', why: 'Examen : ' + soon[0].name + ', le ' + dateLbl(fromIso(soon[0].exam)) };
   for (const t of S.trips || []) {
     if (!t.from || !t.to) continue;
     const from = fromIso(t.from), to = fromIso(t.to);
-    if (from >= weekStart && from < addDays(weekStart, 7)) return { mode: 'avance', why: 'Tu pars le ' + dateLbl(from) + ' : finis en avance.' };
-    if (from >= end && (from - end) / 864e5 < 21) return { mode: 'avance', why: 'Départ « ' + (t.title || 'voyage') + ' » dans ' + Math.ceil((from - weekStart) / 864e5) + ' jours : prends de l’avance.' };
-    if (to < weekStart && (weekStart - to) / 864e5 < 10) {
-      const soon = S.subjects.filter(su => su.exam && (fromIso(su.exam) - weekStart) / 864e5 < 56);
-      if (soon.length) return { mode: 'exam', why: 'Retour de voyage avec des examens qui arrivent : on met le paquet.' };
-    }
+    if (to < weekStart && (weekStart - to) / 864e5 < 10 && examsWithin(S, weekStart, 56).length) return { mode: 'exam', why: 'Retour de voyage' + (t.title ? ' (' + t.title + ')' : '') + ', les examens arrivent' };
   }
-  const nearExam = S.subjects.some(su => su.exam && (fromIso(su.exam) - weekStart) / 864e5 >= 0 && (fromIso(su.exam) - weekStart) / 864e5 < 21);
-  if (nearExam) return { mode: 'exam', why: 'Un examen dans moins de 3 semaines.' };
+  for (const t of S.trips || []) {
+    if (!t.from || !t.to) continue;
+    const from = fromIso(t.from);
+    if (from >= weekStart && from < end) return { mode: 'avance', why: 'Départ' + (t.title ? ' (' + t.title + ')' : '') + ' le ' + dateLbl(from) };
+    if (from >= end && (from - weekStart) / 864e5 < 21) return { mode: 'avance', why: 'Départ' + (t.title ? ' (' + t.title + ')' : '') + ' dans ' + Math.round((from - weekStart) / 864e5) + ' jours' };
+  }
+  if (!coursesOnFor(S, weekStart) && tripDaysIn(S, weekStart) < 3 && examsWithin(S, weekStart, 42).length) return { mode: 'exam', why: 'Semaine sans cours avant les examens' };
+  const carry = carryOver(S, weekStart), late = Object.values(carry).reduce((a, b) => a + b, 0);
+  if (late >= 180) return { mode: 'rattrapage', why: hm(late) + ' de séries pas finies la semaine passée' };
   return null;
+}
+/* Mode of a week: your choice for that week > a switch the app made during the week > automatic pick > your usual mode */
+function weekCfg(S, weekStart) {
+  const key = iso(weekStart);
+  const tripDays = tripDaysIn(S, weekStart);
+  const coursesOn = coursesOnFor(S, weekStart);
+  const manual = (S.weekModes || {})[key], live = (S.autoModes || {})[key];
+  let mode = S.mode, source = 'base', why = '';
+  if (MODE_ORDER.includes(manual)) { mode = manual; source = 'manual'; }
+  else if (live && MODE_ORDER.includes(live.mode)) { mode = live.mode; source = 'auto'; why = live.why || ''; }
+  else if (S.autoMode !== false) { const r = recommendMode(S, weekStart); if (r) { mode = r.mode; source = 'auto'; why = r.why; } }
+  return { key, mode, coursesOn, tripDays, source, why, chosen: source === 'manual' };
 }
 
 const sportMinutes = S => S.routines.filter(r => r.kind === 'sport').reduce((a, r) => a + Math.max(0, r.end - r.start), 0);
@@ -202,6 +221,7 @@ function layoutDay(S, m, weekStart, d) {
   ev.push({ kind: 'meal', start: wake, end: wake + 30, title: 'Petit-déj' });
   courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
+  S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
   dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
   (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r => {
     if (!free(r.start, r.end)) return;
@@ -273,8 +293,7 @@ function doneBySubject(S, key) {
 /* The correction of a série comes out 2 days after that subject's exercise session.
  * Returns the day it can be checked, or null when the subject has no session that week. */
 function corrAvail(S, weekStart, su) {
-  const cfg = weekCfg(S, weekStart);
-  if (!cfg.coursesOn) return null;
+  if (!coursesOnFor(S, weekStart)) return null;
   const ex = S.courses.filter(c => c.subj === su.id && /exerc/i.test(c.type || ''));
   if (!ex.length) return null;
   const last = Math.max(...ex.map(c => c.day));
@@ -284,7 +303,7 @@ const corrDeferred = (S, weekStart, su) => { const a = corrAvail(S, weekStart, s
 
 function carryOver(S, weekStart) {
   const prevKey = iso(addDays(weekStart, -7));
-  if (!S.done[prevKey] || !weekCfg(S, addDays(weekStart, -7)).coursesOn) return {};
+  if (!S.done[prevKey] || !coursesOnFor(S, addDays(weekStart, -7))) return {};
   const done = doneBySubject(S, prevKey).by, out = {};
   const pws = addDays(weekStart, -7);
   for (const su of S.subjects) { const left = (su.serie || 0) + (su.serie && !corrDeferred(S, pws, su) ? (su.corr || 0) : 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
@@ -305,7 +324,7 @@ function generate(S0, weekStart, now) {
   const carry = carryOver(S, weekStart);
   // must = séries + checking them against the correction, plus anything unfinished from last week
   const must = {}, corr = {}, corrFrom = {}; let mustTotal = 0;
-  const prevWs = addDays(weekStart, -7), prevCfg = weekCfg(S0, prevWs);
+  const prevWs = addDays(weekStart, -7), prevCfg = { coursesOn: coursesOnFor(S0, prevWs) };
   for (const su of S.subjects) {
     // this week's correction only if it comes out before Sunday night; otherwise it moves to next week,
     // and last week's late correction is checked this week
@@ -328,7 +347,8 @@ function generate(S0, weekStart, now) {
     T = Math.max(mustTotal, Math.round(T * homeW / (fullW || 1))) + tripDays.reduce((a, x) => a + x.cap, 0);
   }
   // spread T over the days: proportional to free time × weekend share, capped by each day's room
-  const w = days.map(x => x.off || x.trip ? 0 : x.d === 5 ? +m.sat : x.d === 6 ? +m.sun : 1);
+  const examDay = x => S.subjects.some(su => su.exam === x.dIso);
+  const w = days.map(x => x.off || x.trip ? 0 : (x.d === 5 ? +m.sat : x.d === 6 ? +m.sun : 1) * (examDay(x) ? 0.35 : 1));
   const alloc = days.map(() => 0); let rem = T - tripDays.reduce((a, x) => a + x.cap, 0); let active = days.map((x, i) => i).filter(i => w[i] > 0 && days[i].cap > 0);
   for (let it = 0; it < 8 && rem > 1 && active.length; it++) {
     const sw = active.reduce((a, i) => a + w[i] * days[i].cap, 0);
@@ -611,8 +631,8 @@ function buildNotifications(S, now, horizonDays) {
   // every Sunday evening: pick next week's mode
   for (let t = mondayOf(now); t.getTime() < endT; t = addDays(t, 7)) {
     const sun = addDays(t, 6); sun.setHours(19, 30, 0, 0);
-    const rec = recommendMode(S, addDays(t, 7));
-    push(sun.getTime(), 'Quel mode pour la semaine prochaine ?', rec ? 'Je te conseille ' + MODE_META[rec.mode].name + ' : ' + rec.why : 'Ouvre l’app pour choisir ton mode et dire si t’as cours.', 'week' + iso(t));
+    const nc = weekCfg(S, addDays(t, 7));
+    push(sun.getTime(), 'Semaine prochaine : mode ' + MODE_META[nc.mode].name, (nc.source === 'auto' ? nc.why + '. ' : '') + 'Ouvre l’app si tu veux changer, ou si t’as pas cours.', 'week' + iso(t));
   }
   if (N.deadline) for (const mk of S.mocks || []) {
     if (!mk.date) continue; const su = subjOf(S, mk.subj); const t = addDays(fromIso(mk.date), -1); t.setHours(19, 30, 0, 0);
@@ -657,6 +677,6 @@ function freezePast(S, now) {
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
 
-const API = { freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);
