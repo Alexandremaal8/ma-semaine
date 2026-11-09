@@ -359,7 +359,11 @@ function corrAvail(S, weekStart, su) {
   const ex = S.courses.filter(c => c.subj === su.id && /exerc/i.test(c.type || ''));
   if (!ex.length) return null;
   const last = Math.max(...ex.map(c => c.day));
-  return addDays(weekStart, last + 2);
+  const planned = addDays(weekStart, last + 2);
+  // the correction was spotted on Moodle earlier than the usual 2 days
+  const seen = ((S.corrSeen || {})[iso(weekStart)] || {})[su.id];
+  if (seen) { const d = fromIso(seen); if (d < planned) return d < weekStart ? weekStart : d; }
+  return planned;
 }
 const corrDeferred = (S, weekStart, su) => { const a = corrAvail(S, weekStart, su); return !!a && a >= addDays(weekStart, 7); };
 
@@ -865,6 +869,6 @@ function freezePast(S, now) {
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
 
-const API = { STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

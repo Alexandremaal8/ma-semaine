@@ -490,7 +490,7 @@ function renderToday() {
     if (e.kind === 'milestone') {
       const su = subjOf(state, e.subj);
       rows.push(`<div class="it k-ms${e.state === 'done' ? ' done' : ''}" style="--c:${esc(su ? su.color : '')}"><span class="tm">${fmt(e.start)}</span>
-        <div class="ms"><span class="flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><span class="bd"><b>${esc(e.title)}</b><small>${esc(e.sub)}</small></span>
+        <div class="ms"><span class="flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><span class="bd"><b>${esc(e.title)}</b><small>${esc(e.sub)}</small>${(() => { if (!su || !thisWeek) return ''; const av = L.corrAvail(state, ws, su); return av && av > fromIso(todayIso()) && su.corr ? `<button type="button" class="linkbtn mini" data-act="corrNow" data-w="${key}" data-v="${esc(su.id)}">Corrigé déjà sorti ?</button>` : ''; })()}</span>
         <button type="button" class="chk" data-act="msDone" data-w="${key}" data-v="${esc(e.subj)}" aria-pressed="${e.state === 'done'}" aria-label="${esc(e.title)} : ${esc(su ? su.name : '')}">${CHECK}</button></div></div>`);
       continue;
     }
@@ -512,6 +512,7 @@ function renderToday() {
   const prop = thisWeek ? proposal(ws, key, M, wmode) : '';
   $('#todayBody').innerHTML = `${pickWeek}${hero}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
+    ${isToday ? mdTodayCard() : ''}
     <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
 }
 
@@ -519,6 +520,7 @@ function renderToday() {
 function renderCal() {
   const y = calMonth.getFullYear(), mo = calMonth.getMonth();
   const first = new Date(y, mo, 1), start = addDays(first, -dow(first));
+  const mdAll = mdEvents(), mdByDay = {}; mdAll.forEach(e => { mdByDay[e.date] = 1; });
   const cells = [];
   for (let i = 0; i < 42; i++) {
     const d = addDays(start, i), di = iso(d);
@@ -529,6 +531,7 @@ function renderCal() {
     if (L.tripOn(state, di)) dots.push('<i class="i-trip"></i>');
     if ((state.mocks || []).some(x => x.date === di)) dots.push('<i class="i-mock"></i>');
     if (state.subjects.some(s => s.exam === di)) dots.push('<i class="i-ex"></i>');
+    if (mdByDay[di]) dots.push('<i class="i-md"></i>');
     cells.push(`<button type="button" class="cell${d.getMonth() !== mo ? ' out' : ''}${di === todayIso() ? ' today' : ''}" data-act="calday" data-v="${di}" aria-selected="${di === calSel}" aria-label="${longDate(d)}"><span class="n">${d.getDate()}</span><span class="dots">${dots.join('')}</span></button>`);
   }
   const items = [];
@@ -538,11 +541,12 @@ function renderCal() {
   (state.mocks || []).filter(x => x.date === calSel).forEach(x => { const su = subjOf(state, x.subj); items.push(`<button type="button" class="li" data-act="editMock" data-v="${esc(x.id)}" style="--c:#DB2777"><span class="dt"></span><span class="bd"><span class="ti">Examen blanc · ${esc(su ? su.name : '')}</span><span class="su">Facultatif${x.place ? ' · ' + esc(x.place) : ''}</span></span><span class="rt">${fmt(x.start)}<br>${fmt(x.end)}</span>${CHEV}</button>`); });
   if (state.offDays.includes(calSel)) items.push(`<button type="button" class="li" data-act="offDay" data-v="${calSel}" style="--c:var(--faint)"><span class="dt"></span><span class="bd"><span class="ti">Jour off</span><span class="su">Touche pour annuler</span></span></button>`);
   state.events.filter(x => x.date === calSel).sort((a, b) => a.start - b.start).forEach(x => items.push(`<button type="button" class="li" data-act="editEvent" data-v="${esc(x.id)}" style="--c:var(--acc)"><span class="dt"></span><span class="bd"><span class="ti">${esc(x.title)}</span>${x.place ? `<span class="su">${esc(x.place)}</span>` : ''}</span><span class="rt">${fmt(x.start)}<br>${fmt(x.end)}</span>${CHEV}</button>`));
+  mdAll.filter(e => e.date === calSel).forEach(e => { const su = e.subj ? subjOf(state, e.subj) : null; items.push(`<div class="li" style="--c:${su ? esc(su.color) : '#F98012'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(e.title)}</span><span class="su">Moodle · ${esc(su ? su.name : e.course || '')}</span></span><span class="rt">${(() => { const m = mdMin(e.start); return m && m !== 1439 ? fmt(m) : ''; })()}</span></div>`); });
   const sel = fromIso(calSel);
   $('#calBody').innerHTML = `
     <div class="cal-h"><button type="button" data-act="calm" data-v="-1" aria-label="Mois précédent">‹</button><b>${MONTHS_L[mo]} ${y}</b><button type="button" data-act="calm" data-v="1" aria-label="Mois suivant">›</button></div>
     <div class="cal">${DAYS_S.map(n => `<span class="wd">${n}</span>`).join('')}${cells.join('')}</div>
-    <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Off</span><span><i class="i-trip"></i>Voyage</span><span><i class="i-mock"></i>Exam blanc</span><span><i class="i-ex"></i>Examen</span></div>
+    <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Off</span><span><i class="i-trip"></i>Voyage</span><span><i class="i-mock"></i>Exam blanc</span><span><i class="i-ex"></i>Examen</span>${state.moodleOn ? '<span><i class="i-md"></i>Moodle</span>' : ''}</div>
     <div class="sec-t">${longDate(sel)}<button type="button" data-act="openDay">Voir la journée</button></div>
     <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour ajouter quelque chose.</div>'}</div>`;
 }
@@ -609,7 +613,139 @@ function proposal(ws, key, M, wmode) {
     return `<div class="prop"><b>La série de ${esc(su.name)} te prend plutôt ${hm(avg)}.</b><p>Les 2 dernières semaines : ${log.map(x => hm(x.m)).join(' et ')}, pour ${hm(su.serie)} prévues. J’ajuste le planning ?</p>
       <div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="serieAdjust" data-v="${esc(su.id)}" data-m="${avg}">Passer à ${hm(avg)}</button><button type="button" class="btn" data-act="dismiss" data-v="${id}">Garder ${hm(su.serie)}</button></div></div>`;
   }
+  // 3. things found on Moodle
+  return mdProposal();
+}
+
+/* ---------- Moodle (lien calendrier) ---------- */
+const MD_LS = LS + '-moodle';
+let moodle = (() => { try { return JSON.parse(lsGet(MD_LS)); } catch (e) { return null; } })();
+const MD_GUESS = { ana: /analys|math-101/, alg: /algebr|math-111/, phy: /physi|phys-101/, aicc: /aicc|cs-101|information.*comput/, prog: /programm|cs-107|cs-108|cs-111/ };
+const deacc = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+function mdSubj(course, title) {
+  const map = state.moodleMap || {};
+  if (course && Object.prototype.hasOwnProperty.call(map, course)) return map[course] || null;
+  const t = deacc(course + ' ' + (course ? '' : title));
+  for (const su of state.subjects) {
+    const re = MD_GUESS[su.id]; if (re && re.test(t)) return su.id;
+    const w = deacc(su.name).split(/[^a-z0-9]+/).find(x => x.length >= 4); if (w && t.includes(w)) return su.id;
+  }
+  return null;
+}
+function mdKind(title) {
+  const t = deacc(title);
+  if (/blanc|mock|midterm|mi-semestre/.test(t)) return 'mock';
+  if (/(examen|exam\b|exam |final)/.test(t) && !/quiz/.test(t)) return 'exam';
+  if (/s[e]rie|serie|exercise sheet|problem set/.test(t)) return 'serie';
+  if (/due|a rendre|rendu|closes|ferme|deadline|devoir|assignment|quiz|delai/.test(t)) return 'due';
+  return 'event';
+}
+const mdMin = t => { const d = new Date(t); return d.getHours() * 60 + d.getMinutes(); };
+function mdEvents() {
+  if (!state.moodleOn || !moodle || !moodle.events) return [];
+  // Moodle sends "X opens" and "X closes" as two events: merge them into one (start → end)
+  const out = [], open = {};
+  for (const e of moodle.events) {
+    const m = /^(.*?)\s+(opens|closes|s’ouvre|s'ouvre|se ferme|ouverture|fermeture)$/i.exec(e.title);
+    if (!m) { out.push({ ...e }); continue; }
+    const base = m[1], k = e.course + '|' + base, isOpen = /open|ouvr/i.test(m[2]);
+    if (isOpen) { const x = { ...e, title: base, end: e.end, opens: true }; open[k] = x; out.push(x); }
+    else if (open[k] && e.start - open[k].start < 14 * 864e5) { open[k].end = e.start; open[k].uid = open[k].uid + '+'; delete open[k].opens; delete open[k]; }
+    else out.push({ ...e, title: base, closes: true });
+  }
+  return out.map(e => { const k = mdKind(e.title); return { ...e, subj: mdSubj(e.course, e.title), kind: e.closes && k === 'event' ? 'due' : k, date: iso(new Date(e.start)) }; });
+}
+async function mdFetch(force) {
+  if (!WORKER || !syncKey() || !state.moodleOn) return;
+  if (!force && moodle && Date.now() - (moodle.fetched || 0) < 30 * 60e3) return;
+  try {
+    const d = await fetch(WORKER + '/moodle?k=' + syncKey() + (force ? '&force=1' : '')).then(r => r.json());
+    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); keepScroll(renderAll); }
+    return d;
+  } catch (e) { return null; }
+}
+async function ensureKey() {
+  if (syncKey()) return true;
+  if (!WORKER) return false;
+  lsSet(KEY_LS, newKey()); if (!localUpdated()) lsSet(UPD_LS, String(Date.now()));
+  await pushState(); return true;
+}
+function moodleConnect() {
+  openSheet('Connecter Moodle', `<ol class="steps"><li>Dans Safari, va sur <b>moodle.epfl.ch/calendar/export.php</b></li><li>Choisis <b>Tous</b> et <b>Récents et 60 prochains jours</b></li><li>Touche <b>Obtenir l’URL du calendrier</b> et copie le lien</li></ol>
+    <div class="fields">${F.text('ical', 'Lien du calendrier Moodle', state.moodleOn && moodle ? '' : '', 'full', 'https://moodle.epfl.ch/calendar/export_execute.php?…')}</div>
+    <p class="hint" style="margin-top:10px">Ce lien reste privé : il sert seulement à lire tes échéances, une fois par heure.</p>
+    <div class="sh-actions"><button type="submit" class="btn pri">Connecter</button></div>`, fd => {
+    const link = String(fd.ical || '').trim();
+    if (!/^https:\/\/moodle\.epfl\.ch\/calendar\/export_execute\.php\?/.test(link)) { toast('Colle le lien qui commence par moodle.epfl.ch/calendar/export_execute.php'); return false; }
+    (async () => {
+      const btn = $('#shBody .btn.pri'); if (btn) { btn.disabled = true; btn.textContent = 'Connexion…'; }
+      const ok = await ensureKey();
+      let d = null; if (ok) d = await post('/moodle', { k: syncKey(), ical: link }).then(r => r.json()).catch(() => null);
+      if (!d || d.error || (d.errors && d.errors.ical)) { if (btn) { btn.disabled = false; btn.textContent = 'Connecter'; } toast(d ? (d.error || d.errors.ical) : 'Serveur injoignable, réessaie'); return; }
+      d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d));
+      state.moodleOn = true; save(); closeSheet(); renderAll();
+      const n = mdEvents().filter(e => e.start > Date.now()).length;
+      showCard('Moodle connecté', n + ' échéance' + (n > 1 ? 's' : '') + ' à venir trouvée' + (n > 1 ? 's' : '') + '. Je te proposerai de les ajouter au planning.');
+      if (mdUnmapped().length) setTimeout(moodleMapSheet, 600);
+    })();
+    return false;
+  });
+}
+const mdCourses = () => [...new Set(((moodle && moodle.events) || []).map(e => e.course).filter(Boolean))];
+const mdUnmapped = () => mdCourses().filter(c => !mdSubj(c, ''));
+function moodleMapSheet() {
+  const cs = mdCourses();
+  if (!cs.length) { toast('Aucun cours trouvé dans le calendrier Moodle pour l’instant'); return; }
+  const opts = [['', 'Ignorer ce cours']].concat(subjOpts());
+  openSheet('Cours Moodle', `<p style="margin:0 0 12px;color:var(--muted)">À quelle matière correspond chaque cours ?</p><div class="fields">${cs.map((c, i) => F.select('c' + i, esc(c), opts, mdSubj(c, '') || '')).join('')}</div><div class="sh-actions"><button type="submit" class="btn pri">Enregistrer</button></div>`, fd => {
+    state.moodleMap = state.moodleMap || {};
+    cs.forEach((c, i) => { state.moodleMap[c] = fd['c' + i] || ''; });
+    return done();
+  });
+}
+function moodleSet() {
+  if (!state.moodleOn) return `<div class="status"><b>Relier Moodle</b>Tes échéances, quiz et dates d’examen Moodle arrivent dans l’app, qui te propose de les caser dans ton planning.</div><div class="btns"><button type="button" class="btn pri full" data-act="mdConnect">Connecter Moodle</button></div>`;
+  const up = mdEvents().filter(e => e.start > Date.now());
+  const err = moodle && moodle.errors && moodle.errors.ical;
+  const when = moodle && moodle.at ? new Date(moodle.at) : null;
+  return `<div class="status"><b>${err ? 'Moodle : problème de lecture' : 'Moodle connecté'}</b>${err ? esc(err) + '. Reconnecte avec un nouveau lien.' : up.length + ' échéance' + (up.length > 1 ? 's' : '') + ' à venir' + (when ? ' · mis à jour à ' + fmt(when.getHours() * 60 + when.getMinutes()) : '')}</div>
+    <button type="button" class="li" data-act="mdMap"><span class="bd"><span class="ti">Cours ↔ matières</span><span class="su">${mdUnmapped().length ? mdUnmapped().length + ' cours pas encore reliés' : 'Tous les cours sont reliés'}</span></span>${CHEV}</button>
+    <div class="btns"><button type="button" class="btn" data-act="mdRefresh">Actualiser</button><button type="button" class="btn" data-act="mdConnect">Changer le lien</button><button type="button" class="btn" data-act="mdOff">Déconnecter</button></div>`;
+}
+const mdWhen = e => { const d = new Date(e.start), m = mdMin(e.start); return DAYS_S[dow(d)] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + (m && m !== 1439 ? ' · ' + fmt(m) : ''); };
+const de = n => (/^[aeiouyhàâéèêîïôû]/i.test(n) ? 'd’' : 'de ') + n;
+const mdLong = e => { const d = new Date(e.start), m = mdMin(e.start); return DAYS[dow(d)].toLowerCase() + ' ' + d.getDate() + ' ' + MONTHS_L[d.getMonth()].toLowerCase() + (m && m !== 1439 ? ' à ' + fmt(m) : ''); };
+function mdTodayCard() {
+  const now = Date.now(), ev = mdEvents().filter(e => e.end >= now - 3600e3 && e.start < now + 7 * 864e5 && e.kind !== 'event').slice(0, 4);
+  if (!ev.length) return '';
+  return `<div class="sec-t">Moodle · 7 prochains jours</div><div class="group">${ev.map(e => { const su = e.subj ? subjOf(state, e.subj) : null; return `<div class="li" style="--c:${su ? esc(su.color) : 'var(--faint)'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(e.title)}</span><span class="su">${esc(su ? su.name : e.course || 'Moodle')}</span></span><span class="rt">${mdWhen(e).replace(' · ', '<br>')}</span></div>`; }).join('')}</div>`;
+}
+function mdProposal() {
+  const dis = state.dismiss || {}, now = Date.now();
+  for (const e of mdEvents()) {
+    if (!e.subj || e.start < now || dis['md:' + e.uid]) continue;
+    const su = subjOf(state, e.subj); if (!su) continue;
+    const ign = `<button type="button" class="btn" data-act="dismiss" data-v="md:${esc(e.uid)}">Ignorer</button>`;
+    if (e.kind === 'exam' && e.start < now + 150 * 864e5 && su.exam !== e.date)
+      return `<div class="prop"><b>Moodle : examen ${esc(de(su.name))}, le ${mdLong(e)}</b><p>« ${esc(e.title)} ». ${su.exam ? 'Tu avais noté le ' + dateLbl(fromIso(su.exam)) + '. ' : ''}Je l’utilise pour le mode Exam et les révisions ?</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdExam" data-v="${esc(e.uid)}">Ajouter</button>${ign}</div></div>`;
+    if (e.kind === 'mock' && e.start < now + 60 * 864e5 && !(state.mocks || []).some(m => m.subj === e.subj && m.date === e.date))
+      return `<div class="prop"><b>Moodle : examen blanc ${esc(de(su.name))}</b><p style="margin-bottom:0">Le ${mdLong(e)}.</p><p>Je l’ajoute ? La séance d’exercices de ce jour-là est remplacée, et tu as une révision avant.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdMock" data-v="${esc(e.uid)}">Ajouter</button>${ign}</div></div>`;
+    if (e.kind === 'due' && e.start < now + 7 * 864e5 && !(state.backlog || []).some(b => b.mdUid === e.uid))
+      return `<div class="prop"><b>${esc(su.name)} : ${esc(e.title)}</b><p>À rendre au plus tard ${mdLong(e)}. Je le cale dans ton planning avant ?</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdDue" data-v="${esc(e.uid)}" data-m="60">1h</button><button type="button" class="btn" data-act="mdDue" data-v="${esc(e.uid)}" data-m="30">30 min</button><button type="button" class="btn" data-act="mdDue" data-v="${esc(e.uid)}" data-m="120">2h</button>${ign}</div></div>`;
+  }
   return '';
+}
+function mdAction(a, v, b) {
+  if (a === 'mdConnect') { moodleConnect(); return true; }
+  if (a === 'mdMap') { moodleMapSheet(); return true; }
+  if (a === 'mdRefresh') { mdFetch(true).then(d => toast(d && !d.error ? 'Moodle à jour' : 'Moodle injoignable pour l’instant')); return true; }
+  if (a === 'mdOff') { post('/moodle', { k: syncKey(), remove: true }).catch(() => { }); state.moodleOn = false; moodle = null; lsSet(MD_LS, null); save(); renderAll(); toast('Moodle déconnecté'); return true; }
+  const e = mdEvents().find(x => x.uid === v); if (!e) return a.startsWith('md');
+  beginChange();
+  if (a === 'mdExam') { const su = subjOf(state, e.subj); if (su) su.exam = e.date; done(); return true; }
+  if (a === 'mdMock') { let s = mdMin(e.start), en = mdMin(e.end); if (!(en > s) || s < 420) { s = 495; en = 600; } state.mocks.push({ id: uid(), subj: e.subj, date: e.date, start: s, end: en, place: '' }); done(); return true; }
+  if (a === 'mdDue') { state.backlog.push({ id: uid(), subj: e.subj, title: e.title, minutes: +b.dataset.m || 60, urgent: true, created: Date.now(), auto: false, mdUid: e.uid }); done(); return true; }
+  return false;
 }
 
 /* ---------- Stretching ---------- */
@@ -779,6 +915,8 @@ function renderSet() {
       <button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">Cette semaine : ${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">${c.source === 'manual' ? 'Choisi par toi' : c.source === 'auto' ? 'Automatique · ' + esc(c.why) : 'Mode habituel'}</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="baseModeSheet"><span class="bd"><span class="ti">Mode habituel : ${MODE_META[state.mode].name}</span><span class="su">Pour les semaines sans rien de spécial</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>`; })()}
+    <div class="sec-t">Moodle</div>
+    <div class="group">${moodleSet()}</div>
     <div class="sec-t">Mes appareils</div>
     <div class="group">${syncKey()
       ? `<div class="status"><b>Synchro activée</b>Tes données sont les mêmes sur tous les appareils reliés. Sur un autre appareil, ouvre le lien de connexion.</div>
@@ -881,7 +1019,9 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
   if (MUTATING.has(a)) beginChange();
+  if (a.startsWith('md') && a !== 'msDone' && mdAction(a, v, b)) return;
   switch (a) {
+    case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
     case 'wk': selDate = iso(addDays(fromIso(selDate), +v)); renderToday(); return;
@@ -1018,6 +1158,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then
   setTimeout(autoCheck, 300);
   setTimeout(checkIn, 1200);
   syncAll();
+  mdFetch(false);
 })();
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
@@ -1025,6 +1166,7 @@ document.addEventListener('visibilitychange', async () => {
   rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000);
   if (tab === 'today') keepScroll(renderToday);
   syncAll();
+  mdFetch(false);
 });
 // keep two open devices in step
 setInterval(() => { if (document.visibilityState === 'visible' && syncKey()) pull(false); }, 45000);
