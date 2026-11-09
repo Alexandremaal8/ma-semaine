@@ -196,7 +196,7 @@ details.more summary::-webkit-details-marker{display:none}
 
 /* Bottom nav */
 .nav{position:fixed;left:0;right:0;bottom:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line);padding-bottom:var(--sb)}
-.nav .in{display:grid;grid-template-columns:repeat(4,1fr);max-width:640px;margin:0 auto;height:var(--nav-h)}
+.nav .in{display:grid;grid-template-columns:repeat(5,1fr);max-width:640px;margin:0 auto;height:var(--nav-h)}
 .nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--faint);font-size:11.5px;font-weight:650}
 .nav svg{width:25px;height:25px}
 .nav button[aria-current="page"]{color:var(--ink)}
@@ -280,6 +280,18 @@ body[data-mode="rattrapage"]{--accent:#B7791F}
 @keyframes ring{from{transform:scale(.6);opacity:.9}to{transform:scale(1.6);opacity:0}}
 .chk{overflow:visible}
 
+/* backlog */
+.navic{position:relative;display:inline-flex}
+.nbadge{position:absolute;top:-6px;left:15px;font-style:normal;font-size:10px;font-weight:800;line-height:1;padding:3px 5px;border-radius:999px;background:var(--warn);color:#fff;white-space:nowrap}
+.bl-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line);position:relative}
+.bl-row:last-child{border-bottom:0}
+.bl-row::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:4px;border-radius:0 3px 3px 0;background:var(--c,var(--faint))}
+.bl-row .bd{flex:1;min-width:0;text-align:left;display:block}
+.bl-row .ti{display:block;font-weight:700;font-size:15.5px;line-height:1.25}
+.bl-row .su{display:block;font-size:13.5px;color:var(--muted);margin-top:2px;line-height:1.35}
+.bl-row .more{flex:none;font-weight:700;font-size:13.5px;color:var(--acc);padding:7px 10px;border-radius:999px;border:1px solid var(--line)}
+.bl-row.done .ti{text-decoration:line-through;color:var(--muted)}
+.notice [data-tab-go]{font-weight:700;color:var(--acc);padding:4px 6px}
 /* auto tag in the mode pill */
 .autotag{font-size:11px;font-weight:700;opacity:.85;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.22);margin-left:2px}
 /* plan-changed card */
@@ -326,6 +338,11 @@ body[data-mode="avance"]{--accent:#0F766E}
   <button type="button" class="fab" data-act="addSheet" aria-label="Ajouter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
 </section>
 
+<section class="view" id="v-bl">
+  <header class="p-head"><div class="wrap"><h1 class="big">Retard</h1><p>Ce que t’as à rattraper. Coche quand c’est fini.</p></div></header>
+  <div class="wrap" id="blBody" style="padding-top:14px"></div>
+</section>
+
 <section class="view" id="v-week">
   <header class="p-head"><div class="wrap"><h1 class="big">Ma semaine type</h1><p>Ce qui revient chaque semaine. Touche une ligne pour la modifier.</p></div></header>
   <div class="wrap" id="weekBody"></div>
@@ -340,6 +357,7 @@ body[data-mode="avance"]{--accent:#0F766E}
   <div class="in">
     <button type="button" data-tab="today" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Aujourd’hui</button>
     <button type="button" data-tab="cal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Calendrier</button>
+    <button type="button" data-tab="bl"><span class="navic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4.5V8h3.5"/><path d="M12 8v4.5l2.5 1.5"/></svg><em class="nbadge" id="blBadge" hidden></em></span>Retard</button>
     <button type="button" data-tab="week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 19V11M9.5 19V7M14 19V13M18.5 19V5"/></svg>Ma semaine</button>
     <button type="button" data-tab="set"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a5 5 0 0 0-5 5v3.5L5 16h14l-2-3.5V9a5 5 0 0 0-5-5zM10 19a2 2 0 0 0 4 0"/></svg>Réglages</button>
   </div>

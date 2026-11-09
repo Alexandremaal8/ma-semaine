@@ -358,6 +358,12 @@ function planSig() {
   }
   return { blocks, mins };
 }
+function showCard(title, detail) {
+  const el = $('#upd');
+  el.innerHTML = `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span><b>${esc(title)}</b><small>${esc(detail)}</small></span>`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  clearTimeout(showCard._t); showCard._t = setTimeout(() => el.classList.remove('on'), 3800);
+}
 function beginChange() { L.freezePast(state); pendingSig = planSig(); }
 function endChange(title, lead) {
   if (!pendingSig) return;
@@ -426,6 +432,7 @@ function renderToday() {
     }
   }
   let advice = '';
+  const blT = M.blTotal || 0;
   if (thisWeek && M.mustAllDone && !pickWeek) {
     const weOff = state.offDays.includes(iso(addDays(ws, 5))) && state.offDays.includes(iso(addDays(ws, 6)));
     advice = `<div class="notice"><span><b>Toutes tes séries de la semaine sont faites.</b> Tu peux continuer, ou lever le pied.</span>${wmode !== 'chill' ? `<button type="button" data-act="setMode" data-v="chill" data-w="${key}">Chill</button>` : ''}${weOff ? '' : `<button type="button" data-act="weekendOff" data-v="${key}">Week-end off</button>`}</div>`;
@@ -447,12 +454,13 @@ function renderToday() {
     if (e.state === 'missed') cls.push('missed');
     else if ((isToday && e.end <= mins) || isPastDay) cls.push('past');
     if (isDone) cls.push('done');
-    const tags = (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
+    const tags = (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
       <div class="card"><div class="bd"><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}</div>` : ''}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
-  $('#todayBody').innerHTML = `${pickWeek}${hero}${late}${advice}${notice}${prog}<div class="tl">${rows.join('')}</div>
+  const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
+  $('#todayBody').innerHTML = `${pickWeek}${hero}${late}${advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
     <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
 }
@@ -487,6 +495,74 @@ function renderCal() {
     <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Off</span><span><i class="i-trip"></i>Voyage</span><span><i class="i-mock"></i>Exam blanc</span><span><i class="i-ex"></i>Examen</span></div>
     <div class="sec-t">${longDate(sel)}<button type="button" data-act="openDay">Voir la journée</button></div>
     <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour ajouter quelque chose.</div>'}</div>`;
+}
+
+/* ---------- Retard ---------- */
+const BL_TIMES = [[30, '30 min'], [60, '1h'], [90, '1h30'], [120, '2h'], [180, '3h'], [240, '4h'], [300, '5h']];
+function editBacklog(id) {
+  const x = (state.backlog || []).find(e => e.id === id) || { id: null, subj: (state.subjects[0] || {}).id, title: '', minutes: 120, urgent: false };
+  const cr = x.id ? L.backlogCredit(state, x.id) : 0;
+  openSheet(x.id ? 'Modifier le retard' : 'Ajouter un retard', `<div class="fields">
+    ${F.select('subj', 'Matière', subjOpts(), x.subj)}
+    ${F.text('title', 'Quoi', x.title, 'full', 'ex. Série 6, cours 8 à relire…')}
+    ${F.select('minutes', 'Temps qu’il te faut' + (cr ? ' (en tout, ' + hm(cr) + ' déjà fait)' : ''), BL_TIMES.concat([[x.minutes, hm(x.minutes)]]).filter((v, i, a) => a.findIndex(w => w[0] === v[0]) === i).sort((a, b) => a[0] - b[0]), x.minutes)}
+  </div>
+  <div class="group" style="margin-top:12px"><label class="row-sw"><span class="bd"><span class="ti">Urgent</span><span class="su">Passe avant les autres retards</span></span><input type="checkbox" class="sw" name="urgent" ${x.urgent ? 'checked' : ''}></label></div>
+  ${actions(!!x.id)}`, (fd, btn) => {
+    if (isDel(btn)) { state.backlog = state.backlog.filter(e => e.id !== x.id); return done(); }
+    const obj = { id: x.id || uid(), subj: fd.subj, title: fd.title.trim() || 'Retard', minutes: +fd.minutes || 60, urgent: !!fd.urgent, created: x.created || Date.now(), auto: !!x.auto };
+    if (x.id) Object.assign(x, obj); else state.backlog.push(obj);
+    return done();
+  });
+}
+function renderBacklog() {
+  const ws = mondayOf(new Date()), days = L.generate(state, ws), M = days.meta;
+  const open = L.backlogOpen(state), total = open.reduce((a, x) => a + x.left, 0);
+  const lastBl = days.flatMap(x => x.ev.filter(e => e.bl && e.state === 'todo').map(e => ({ d: x.date, e }))).sort((a, b) => (b.d - a.d) || (b.e.end - a.e.end))[0];
+  const fmtNext = t => { const d = new Date(t); const di = iso(d); return (di === todayIso() ? 'aujourd’hui' : DAYS[dow(d)].toLowerCase()) + ' ' + fmt(d.getHours() * 60 + d.getMinutes()); };
+  let summary;
+  if (!open.length) summary = `<div class="hero quiet"><div class="k">Retard</div><div class="t">Rien à rattraper</div><div class="s">Si une série n’est pas finie à la fin d’une semaine, elle arrive ici toute seule.</div></div>`;
+  else {
+    const allIn = M.blPlaced >= total - 15;
+    summary = `<div class="hero"><div class="k">À rattraper</div><div class="t">${hm(total)}</div><div class="s">${allIn ? 'Tout est casé cette semaine' + (lastBl ? ', fini d’ici ' + DAYS[dow(lastBl.d)].toLowerCase() : '') + '.' : hm(M.blPlaced) + ' cette semaine (max ' + hm(state.modes[M.cfg.mode].bl) + ' par jour en mode ' + MODE_META[M.cfg.mode].name + '), le reste ensuite.'}</div>
+      <div class="bar"><i style="width:${total ? Math.min(100, M.blPlaced / total * 100) : 0}%"></i></div></div>`;
+  }
+  const week = M.lateMin >= 15 ? `<div class="notice"><span><b>Cette semaine : ${hm(M.lateMin)} pas faits</b>, déjà replacés dans ta semaine. Ce qui ne sera pas fait dimanche soir arrivera ici.</span></div>` : '';
+  const rows = open.map(x => {
+    const su = subjOf(state, x.subj), nx = M.blNext[x.id];
+    const info = x.left < 15 ? '<b style="color:var(--acc)">Temps prévu fait · coche si c’est fini</b>' : `${hm(x.left)} restant${x.credit ? ' · ' + hm(x.credit) + ' déjà fait' : ''} · ${nx ? 'prochain bloc ' + fmtNext(nx) : 'pas encore placé'}`;
+    return `<div class="bl-row" style="--c:${esc(su ? su.color : '')}">
+      <button type="button" class="chk" data-act="blDone" data-v="${esc(x.id)}" aria-pressed="false" aria-label="Fini : ${esc(x.title)}">${CHECK}</button>
+      <button type="button" class="bd" data-act="editBacklog" data-v="${esc(x.id)}"><span class="ti">${esc(x.title)}${x.urgent ? '<span class="tag">urgent</span>' : ''}${x.auto ? '<span class="tag cu">auto</span>' : ''}</span><span class="su">${esc(su ? su.name : '')} · ${info}</span></button>
+      ${x.left < 15 ? `<button type="button" class="more" data-act="blMore" data-v="${esc(x.id)}">+30 min</button>` : ''}
+    </div>`;
+  }).join('');
+  const recent = (state.backlog || []).filter(x => x.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 6);
+  $('#blBody').innerHTML = `${summary}${week}
+    <div class="sec-t">${open.length ? 'À faire' : ''}<button type="button" data-act="editBacklog">+ Ajouter un retard</button></div>
+    ${open.length ? `<div class="group">${rows}</div><p class="hint" style="margin-top:8px">Les blocs « Retard » apparaissent dans ta journée. Coche ici quand c’est vraiment fini : tant que c’est pas coché, l’app continue de prévoir du temps.</p>` : '<div class="group"><div class="empty">Ajoute ce que t’as en retard (série, cours à relire…) avec le temps qu’il te faut. L’app le répartit dans tes semaines sans faire passer tes séries en retard.</div></div>'}
+    ${recent.length ? `<div class="sec-t">Fini récemment</div><div class="group">${recent.map(x => `<div class="bl-row done" style="--c:${esc((subjOf(state, x.subj) || {}).color || '')}"><button type="button" class="chk" data-act="blUndo" data-v="${esc(x.id)}" aria-pressed="true" aria-label="Remettre : ${esc(x.title)}">${CHECK}</button><span class="bd"><span class="ti">${esc(x.title)}</span><span class="su">${esc((subjOf(state, x.subj) || {}).name || '')}</span></span></div>`).join('')}</div>` : ''}`;
+  const badge = $('#blBadge'); if (badge) { badge.textContent = total >= 15 ? hm(total) : ''; badge.hidden = total < 15; }
+}
+/* End of a week: unfinished séries go to the backlog by themselves */
+function rollover() {
+  const cur = mondayOf(new Date()), sinceWs = mondayOf(new Date(state.since || Date.now()));
+  const added = [];
+  for (let k = 4; k >= 1; k--) {
+    const ws = addDays(cur, -7 * k), key = iso(ws);
+    if (state.rolled[key]) continue;
+    state.rolled[key] = 1;
+    if (ws < sinceWs) continue;
+    const end = new Date(addDays(ws, 7).getTime() - 1000);
+    const M = L.generate(state, ws, end).meta;
+    for (const [subj, u] of Object.entries(M.unfinished || {})) {
+      const su = subjOf(state, subj); if (!su) continue;
+      const it = { id: uid(), subj, title: (u.left - u.corr >= 15 ? 'Série' : 'Correction de la série') + (u.left - u.corr >= 15 && u.corr >= 15 ? ' + correction' : '') + ' du ' + dateLbl(ws), minutes: u.left, created: end.getTime(), auto: true };
+      state.backlog.push(it); added.push(it);
+    }
+  }
+  if (added.length) { save(); renderAll(); showCard('Retard mis à jour', added.length + ' série' + (added.length > 1 ? 's' : '') + ' pas finie' + (added.length > 1 ? 's' : '') + ' de la semaine passée · ' + hm(added.reduce((a, x) => a + x.minutes, 0))); }
+  else save();
 }
 
 /* ---------- Ma semaine type ---------- */
@@ -600,12 +676,12 @@ function widgetSheet() {
     <p class="hint" style="margin-top:10px">Le widget affiche ce que tu fais maintenant et la suite. Il se met à jour quand tu ouvres l’app.</p>`);
 }
 
-function renderAll() { renderToday(); if (tab === 'cal') renderCal(); renderWeek(); renderSet(); }
+function renderAll() { renderToday(); if (tab === 'cal') renderCal(); renderWeek(); renderSet(); renderBacklog(); }
 function showTab(t) {
   tab = t;
   document.querySelectorAll('.nav button').forEach(b => { if (b.dataset.tab === t) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + t));
-  if (t === 'cal') renderCal(); if (t === 'today') renderToday(); if (t === 'set') renderSet(); if (t === 'week') renderWeek();
+  if (t === 'cal') renderCal(); if (t === 'today') renderToday(); if (t === 'set') renderSet(); if (t === 'week') renderWeek(); if (t === 'bl') renderBacklog();
   window.scrollTo(0, 0);
 }
 const keepScroll = fn => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
@@ -618,6 +694,7 @@ async function copyText(txt, okMsg) {
 const MUTATING = new Set(['setMode', 'offDay', 'weekendOff', 'importDo']);
 document.addEventListener('click', async e => {
   const nb = e.target.closest('.nav button'); if (nb) { showTab(nb.dataset.tab); return; }
+  const tg = e.target.closest('[data-tab-go]'); if (tg) { showTab(tg.dataset.tabGo); return; }
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
   if (MUTATING.has(a)) beginChange();
@@ -632,7 +709,7 @@ document.addEventListener('click', async e => {
         const days = L.generate(state, fromIso(wk)); let ev = null;
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
-        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, fx: !!ev.fixed } : { k: ev.kind, m: ev.end - ev.start };
+        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, fx: !!ev.fixed, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
         b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
       }
       save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;
@@ -642,6 +719,10 @@ document.addEventListener('click', async e => {
     case 'hoursSheet': hoursSheet(); return;
     case 'modeSheet': modeSheet(b.dataset.w); return;
     case 'baseModeSheet': baseModeSheet(); return;
+    case 'editBacklog': editBacklog(v); return;
+    case 'blDone': { beginChange(); const x = state.backlog.find(e => e.id === v); if (x) { x.done = true; x.doneAt = Date.now(); } b.classList.add('pop'); b.setAttribute('aria-pressed', 'true'); setTimeout(() => { save(); renderAll(); endChange('Retard fini', x ? x.title : ''); }, 380); return; }
+    case 'blUndo': { beginChange(); const x = state.backlog.find(e => e.id === v); if (x) { x.done = false; delete x.doneAt; } done(); return; }
+    case 'blMore': { beginChange(); const x = state.backlog.find(e => e.id === v); if (x) x.minutes = L.backlogCredit(state, x.id) + 30; done(); return; }
     case 'setBase': beginChange(); state.mode = v; closeSheet(); done(); return;
     case 'weekOk': state.weekSeen = state.weekSeen || {}; state.weekSeen[v] = 1; save(); renderToday(); return;
     case 'setMode': { const wk = b.dataset.w || wkOf(selDate);
@@ -689,7 +770,7 @@ document.addEventListener('change', e => {
 
 
 /* ---------- bubble touch effect ---------- */
-const BUB_SEL = '.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
+const BUB_SEL = '.bl-row .bd,.bl-row .more,.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
 document.addEventListener('pointerdown', e => {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const el = e.target.closest(BUB_SEL); if (!el) return;
@@ -703,9 +784,10 @@ document.addEventListener('pointerdown', e => {
 renderAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => r.update().catch(() => { })).catch(e => console.warn('sw', e));
 syncAll();
+rollover();
 setTimeout(autoCheck, 800);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') setTimeout(autoCheck, 300);
+  if (document.visibilityState === 'visible') { rollover(); setTimeout(autoCheck, 300); }
   if (document.visibilityState !== 'visible') return;
   if (tab === 'today') keepScroll(renderToday);
   syncAll();

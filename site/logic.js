@@ -21,13 +21,13 @@ const MODE_META = {
 };
 /* week: weekly study minutes · sat/sun: share of a weekday · ext: max catch-up minutes added per evening */
 const MODE_DEFAULTS = {
-  chill:      { week: 720,  sat: 0,   sun: 0.5, block: 45, pause: 15, freeEve: 150, ext: 30 },
-  normal:     { week: 1200, sat: 0.6, sun: 0.6, block: 50, pause: 10, freeEve: 90,  ext: 45 },
-  charbon:    { week: 1920, sat: 1,   sun: 0.8, block: 50, pause: 10, freeEve: 45,  ext: 60 },
-  avance:     { week: 1680, sat: 1,   sun: 0.6, block: 50, pause: 10, freeEve: 75,  ext: 30 },
-  rattrapage: { week: 1440, sat: 1,   sun: 0.7, block: 50, pause: 10, freeEve: 120, ext: 75 },
-  exam:       { week: 2100, sat: 1,   sun: 1,   block: 50, pause: 10, freeEve: 60,  ext: 60 },
-  recup:      { week: 360,  sat: 0,   sun: 0.3, block: 30, pause: 15, freeEve: 180, ext: 0 }
+  chill:      { week: 720,  sat: 0,   sun: 0.5, block: 45, pause: 15, freeEve: 150, ext: 30, bl: 30 },
+  normal:     { week: 1200, sat: 0.6, sun: 0.6, block: 50, pause: 10, freeEve: 90,  ext: 45, bl: 60 },
+  charbon:    { week: 1920, sat: 1,   sun: 0.8, block: 50, pause: 10, freeEve: 45,  ext: 60, bl: 90 },
+  avance:     { week: 1680, sat: 1,   sun: 0.6, block: 50, pause: 10, freeEve: 75,  ext: 30, bl: 75 },
+  rattrapage: { week: 1440, sat: 1,   sun: 0.7, block: 50, pause: 10, freeEve: 120, ext: 75, bl: 150 },
+  exam:       { week: 2100, sat: 1,   sun: 1,   block: 50, pause: 10, freeEve: 60,  ext: 60, bl: 45 },
+  recup:      { week: 360,  sat: 0,   sun: 0.3, block: 30, pause: 15, freeEve: 180, ext: 0, bl: 0 }
 };
 const REV_LABELS = {
   chill: ['Relire le cours'], normal: ['Relire + fiche résumé', 'Exos en plus'],
@@ -81,7 +81,7 @@ function defaultState() {
       R(6, 540, 780, 'Lessive, nettoyage, cuisine'),
       R(6, 1215, 1260, 'Préparer la semaine (sac, lunch, cours de lundi)')
     ],
-    events: [], offDays: [], trips: [], mocks: [], weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
+    events: [], offDays: [], trips: [], mocks: [], backlog: [], rolled: {}, weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
     modes: clone(MODE_DEFAULTS),
     notif: { on: false, course: 10, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
     done: {}
@@ -133,10 +133,11 @@ function normalize(s) {
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
   out.notif = Object.assign({}, d.notif, out.notif || {});
   out.done = out.done || {};
-  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
+  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
   if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
   if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
+  if (!out.rolled || typeof out.rolled !== 'object') out.rolled = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
   out.v = 7;
   return out;
@@ -168,8 +169,8 @@ function recommendMode(S, weekStart) {
     if (from >= end && (from - weekStart) / 864e5 < 21) return { mode: 'avance', why: 'Départ' + (t.title ? ' (' + t.title + ')' : '') + ' dans ' + Math.round((from - weekStart) / 864e5) + ' jours' };
   }
   if (!coursesOnFor(S, weekStart) && tripDaysIn(S, weekStart) < 3 && examsWithin(S, weekStart, 42).length) return { mode: 'exam', why: 'Semaine sans cours avant les examens' };
-  const carry = carryOver(S, weekStart), late = Object.values(carry).reduce((a, b) => a + b, 0);
-  if (late >= 180) return { mode: 'rattrapage', why: hm(late) + ' de séries pas finies la semaine passée' };
+  const late = backlogTotal(S);
+  if (late >= 180) return { mode: 'rattrapage', why: hm(late) + ' de retard à rattraper' };
   return null;
 }
 /* Mode of a week: your choice for that week > a switch the app made during the week > automatic pick > your usual mode */
@@ -286,7 +287,7 @@ function examWeight(S, su, date) {
 }
 function doneBySubject(S, key) {
   const out = {}; let total = 0;
-  for (const v of Object.values(S.done[key] || {})) if (v && typeof v === 'object' && v.m && !v.fx) { out[v.s || '_'] = (out[v.s || '_'] || 0) + v.m; total += v.m; }
+  for (const v of Object.values(S.done[key] || {})) if (v && typeof v === 'object' && v.m && !v.fx && !v.b) { out[v.s || '_'] = (out[v.s || '_'] || 0) + v.m; total += v.m; }
   return { by: out, total };
 }
 /* Séries from last week that were never finished. Only counts if the app was used that week. */
@@ -301,7 +302,22 @@ function corrAvail(S, weekStart, su) {
 }
 const corrDeferred = (S, weekStart, su) => { const a = corrAvail(S, weekStart, su); return !!a && a >= addDays(weekStart, 7); };
 
+/* Backlog ("Retard"): items you add, plus unfinished séries added automatically at the end of each week.
+ * An item stays until you tick it; the minutes of blocks done for it count as progress. */
+function backlogCredit(S, id) {
+  let m = 0;
+  for (const wk of Object.values(S.done || {})) for (const v of Object.values(wk || {})) if (v && typeof v === 'object' && v.b === id) m += v.m || 0;
+  return m;
+}
+function backlogOpen(S) {
+  return (S.backlog || []).filter(x => !x.done).map(x => Object.assign({}, x, { credit: backlogCredit(S, x.id), left: Math.max(0, (+x.minutes || 0) - backlogCredit(S, x.id)) }))
+    .sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || (a.created || 0) - (b.created || 0));
+}
+const backlogTotal = S => backlogOpen(S).reduce((a, x) => a + x.left, 0);
+
 function carryOver(S, weekStart) {
+  // replaced by the backlog: unfinished séries become backlog items at the end of the week
+  if (S.backlog) return {};
   const prevKey = iso(addDays(weekStart, -7));
   if (!S.done[prevKey] || !coursesOnFor(S, addDays(weekStart, -7))) return {};
   const done = doneBySubject(S, prevKey).by, out = {};
@@ -395,10 +411,27 @@ function generate(S0, weekStart, now) {
   const prevCourse = (s) => days[s.d].courses.find(c => c.end <= s.start && c.end >= s.start - 60 && c.type === 'Cours');
 
   // assignment helper: fills slots in order from the given budgets (must first, then revision)
-  function assignInto(list, mustLeft, carryLeft, revLeft, corrLeft) {
+  function assignInto(list, mustLeft, carryLeft, revLeft, corrLeft, bl) {
     const lastByDay = {}; const cnt = {};
-    for (const s of list) {
+    const suffix = []; { let acc = 0; for (let i = list.length - 1; i >= 0; i--) { suffix[i] = acc; acc += list[i].len; } }
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
       let pick = null, kind = null;
+      if (bl && bl.items.some(x => x.left >= 15)) {
+        const mustSum = Object.values(mustLeft).reduce((a, b) => a + Math.max(0, b), 0);
+        const used = bl.dayUsed[s.d] || 0;
+        const corrNow = Object.keys(mustLeft).some(k => mustLeft[k] - (corrLeft[k] || 0) < 15 && (corrLeft[k] || 0) >= 15 && (!corrFrom[k] || s.date >= corrFrom[k]));
+        if (!corrNow && used + 15 <= bl.cap && suffix[i] >= (mustSum ? mustSum * 1.1 + 30 : 0)) {
+          const it = bl.items.find(x => x.left >= 15);
+          const len = Math.min(s.len, Math.max(20, Math.min(it.left, bl.cap - used)));
+          if (len < s.len) { s.end = s.start + len; s.endT = s.startT + len * 6e4; s.len = len; }
+          const su = subjOf(S, it.subj);
+          s.title = 'Retard · ' + it.title; s.subj = su ? it.subj : null; s.bl = it.id; s.late = true;
+          it.left -= s.len; bl.dayUsed[s.d] = used + s.len;
+          if (su) lastByDay[s.d] = it.subj;
+          continue;
+        }
+      }
       // a subject's correction check only comes once its série is fully placed
       const serieLeft = k => mustLeft[k] - (corrLeft[k] || 0);
       const mk = Object.keys(mustLeft).filter(k => mustLeft[k] >= 15 && subjOf(S, k));
@@ -425,6 +458,7 @@ function generate(S0, weekStart, now) {
         }
       }
       if (!pick) { s.kind2 = 'ahead'; continue; }
+      // (backlog items without a subject are handled above; nothing else to do here)
       const su = subjOf(S, pick);
       if (kind === 'corr') {
         const need = Math.max(20, Math.min(s.len, corrLeft[pick]));
@@ -449,7 +483,10 @@ function generate(S0, weekStart, now) {
 
   // 1. reference plan for the whole week (what each block "was meant" to be)
   const base = slots.map(s => Object.assign({}, s));
-  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr));
+  const blOpen = backlogOpen(S);
+  const blCap = +m.bl || 0;
+  const mkBl = () => ({ cap: blCap, dayUsed: {}, items: blOpen.map(x => ({ id: x.id, title: x.title, subj: x.subj, left: x.left })) });
+  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr), blOpen.length && blCap ? mkBl() : null);
 
   // 2. live plan: done work comes off the budgets, unfinished work moves to the blocks still ahead
   const doneMap = S.done[key] || {};
@@ -491,7 +528,7 @@ function generate(S0, weekStart, now) {
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
     const b = base[i];
-    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie }));
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, bl: rec.b, late: !!rec.b }));
     else if (s.endT <= nowT) {
       const pre = s.endT <= sinceT;
       if (!pre) lateMin += s.len;
@@ -503,8 +540,9 @@ function generate(S0, weekStart, now) {
   for (const [id, rec] of Object.entries(doneMap)) {
     if (slotIds.has(id) || !rec || typeof rec !== 'object' || rec.d == null || rec.a == null) continue;
     const x = days[rec.d]; if (!x) continue;
-    live.push({ d: rec.d, date: x.date, start: rec.a, end: rec.a + rec.m, len: rec.m, id, title: rec.t, subj: rec.s, state: 'done', catchup: true });
+    live.push({ d: rec.d, date: x.date, start: rec.a, end: rec.a + rec.m, len: rec.m, id, title: rec.t, subj: rec.s, state: 'done', catchup: !rec.b, bl: rec.b, late: !!rec.b });
   }
+  const unfinished = {}; for (const k of Object.keys(mustLeft)) if (mustLeft[k] >= 20) unfinished[k] = { left: Math.round(mustLeft[k]), corr: Math.round(corrLeft[k] || 0) };
   const mustNeeded = Object.values(mustLeft).reduce((a, b) => a + b, 0);
   const futureCap = future.reduce((a, s) => a + s.len, 0);
   // 3. not enough room for the séries → first the bounded catch-up time in the evenings still ahead,
@@ -540,7 +578,8 @@ function generate(S0, weekStart, now) {
   const mustNeed = mustNeeded ? Math.round(mustNeeded * 1.1 + 30) : 0;
   if (mustNeed > futureCap) future.push(...extendBy(mustNeed - futureCap));
   future.sort((a, b) => a.startT - b.startT);
-  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft);
+  const blLive = blOpen.length && blCap ? mkBl() : null;
+  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft, blLive);
   const leftNow = () => Object.values(mustLeft).reduce((a, b) => a + (b >= 25 ? b : 0), 0);
   for (let k = 0; k < 2 && leftNow() >= 25; k++) {
     // if only corrections are left, extra time only helps on/after the day they come out
@@ -552,12 +591,23 @@ function generate(S0, weekStart, now) {
     assignInto(more, mustLeft, carryLeft, {}, corrLeft);
   }
   const mustLeftAfter = leftNow();
+  let blPlaced = 0;
+  if (blLive) {
+    const leftBl = () => blLive.items.reduce((a, x) => a + (x.left >= 15 ? x.left : 0), 0);
+    if (leftBl() >= 30) {
+      const room = days.filter(x => x.date.getTime() + 864e5 > nowT).reduce((a, x) => a + Math.max(0, blCap - (blLive.dayUsed[x.d] || 0)), 0);
+      const more = extendBy(Math.min(leftBl(), room)).sort((a, b) => a.startT - b.startT);
+      assignInto(more, Object.fromEntries(Object.keys(mustLeft).map(k => [k, 0])), {}, {}, {}, blLive);
+      for (const f of more) if (!f.bl) { const i = live.indexOf(f); if (i >= 0) live.splice(i, 1); extended -= f.len; }
+    }
+    blPlaced = live.filter(x => x.bl && x.state === 'todo').reduce((a, x) => a + x.len, 0);
+  }
 
   for (const s of live) {
     const x = days[s.d];
     if (s.kind2 === 'ahead') { x.ev.push({ kind: 'free', start: s.start, end: s.end, title: 'Libre', sub: 'T’es en avance', id: s.id }); continue; }
     const su = s.subj ? subjOf(S, s.subj) : null;
-    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, late: !!s.late, catchup: !!s.catchup, len: s.len });
+    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len });
   }
   // free time and days off
   for (const x of days) {
@@ -580,7 +630,8 @@ function generate(S0, weekStart, now) {
     x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
     x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);
   }
-  days.meta = { cfg, T, mustTotal, mustAllDone: mustTotal > 0 && mustNeeded === 0, carry, lateMin, extended, unplaced, mustLeftAfter, sportMin: sportMinutes(S) };
+  const blNext = {}; for (const x of live) if (x.bl && x.state === 'todo' && (!blNext[x.bl] || x.startT < blNext[x.bl])) blNext[x.bl] = x.startT;
+  days.meta = { unfinished, blPlaced, blNext, blTotal: blOpen.reduce((a, x) => a + x.left, 0), cfg, T, mustTotal, mustAllDone: mustTotal > 0 && mustNeeded === 0, carry, lateMin, extended, unplaced, mustLeftAfter, sportMin: sportMinutes(S) };
   return days;
 }
 
@@ -677,6 +728,6 @@ function freezePast(S, now) {
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
 
-const API = { coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

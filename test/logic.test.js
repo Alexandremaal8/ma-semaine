@@ -68,3 +68,15 @@ console.log(bad?'FAIL '+bad:'OK');
  const pr=d[0].ev.find(e=>e.fixed);console.log('lundi prépa physique:',pr&&L.fmt(pr.start)+'-'+L.fmt(pr.end)+' '+pr.title+' · '+pr.sub);if(!pr)fail('no physics prep');
  const v=L.normalize({v:5,subjects:[{id:'phy',name:'Physique (mécanique)'}],routines:[]});console.log('migration v6:',v.routines.filter(r=>r.kind==='study').length);}
 console.log(bad?'FAIL '+bad:'OK');
+// 12. backlog: placed within the daily budget, séries still all fit; done blocks count as progress
+{const S=L.defaultState();S.since=0;S.backlog=[{id:'b1',subj:'ana',title:'Série 6',minutes:180,created:1},{id:'b2',subj:'phy',title:'Cours 7 à relire',minutes:90,created:2}];
+ const now=new Date(2026,10,9,6,0),ws=L.mondayOf(now);let d=L.generate(S,ws,now);
+ console.log('retard placé',L.hm(d.meta.blPlaced),'sur',L.hm(d.meta.blTotal),'| séries pas casées',d.meta.mustLeftAfter);
+ d.forEach(x=>{const b=x.ev.filter(e=>e.bl);if(b.length)console.log('   ',L.DAYS[x.d],b.map(e=>L.fmt(e.start)+'-'+L.fmt(e.end)+' '+e.title).join(' | '))});
+ if(d.meta.mustLeftAfter>0)fail('backlog crowded out séries');
+ const cap=S.modes[d.meta.cfg.mode].bl;console.log('   mode',d.meta.cfg.mode,'budget/jour',cap);for(const x of d){const b=x.ev.filter(e=>e.bl).reduce((a,e)=>a+e.end-e.start,0);if(b>cap+20)fail('daily backlog budget exceeded',x.d,b)}
+ const e=d.flatMap(x=>x.ev).find(e=>e.bl==='b1');S.done[L.iso(ws)]={[e.id]:{s:'ana',t:e.title,m:e.end-e.start,d:0,a:e.start,b:'b1'}};
+ const o=L.backlogOpen(S).find(x=>x.id==='b1');console.log('après 1 bloc coché: reste',L.hm(o.left));if(o.left!==180-(e.end-e.start))fail('credit');
+ S.mode='normal';S.backlog.push({id:'b3',subj:'alg',title:'Gros retard',minutes:240,created:3});console.log('auto avec gros retard:',L.weekCfg(S,ws).mode,'·',L.weekCfg(S,ws).why);
+ const r=L.generate(S,ws,now);console.log('en rattrapage: retard placé',L.hm(r.meta.blPlaced),'sur',L.hm(r.meta.blTotal),'| séries pas casées',r.meta.mustLeftAfter);}
+console.log(bad?'FAIL '+bad:'OK');
