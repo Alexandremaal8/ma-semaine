@@ -270,11 +270,24 @@ function doneBySubject(S, key) {
   return { by: out, total };
 }
 /* Séries from last week that were never finished. Only counts if the app was used that week. */
+/* The correction of a série comes out 2 days after that subject's exercise session.
+ * Returns the day it can be checked, or null when the subject has no session that week. */
+function corrAvail(S, weekStart, su) {
+  const cfg = weekCfg(S, weekStart);
+  if (!cfg.coursesOn) return null;
+  const ex = S.courses.filter(c => c.subj === su.id && /exerc/i.test(c.type || ''));
+  if (!ex.length) return null;
+  const last = Math.max(...ex.map(c => c.day));
+  return addDays(weekStart, last + 2);
+}
+const corrDeferred = (S, weekStart, su) => { const a = corrAvail(S, weekStart, su); return !!a && a >= addDays(weekStart, 7); };
+
 function carryOver(S, weekStart) {
   const prevKey = iso(addDays(weekStart, -7));
   if (!S.done[prevKey] || !weekCfg(S, addDays(weekStart, -7)).coursesOn) return {};
   const done = doneBySubject(S, prevKey).by, out = {};
-  for (const su of S.subjects) { const left = (su.serie || 0) + (su.serie ? (su.corr || 0) : 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
+  const pws = addDays(weekStart, -7);
+  for (const su of S.subjects) { const left = (su.serie || 0) + (su.serie && !corrDeferred(S, pws, su) ? (su.corr || 0) : 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
   return out;
 }
 
@@ -291,9 +304,16 @@ function generate(S0, weekStart, now) {
   // must = this week's séries + unfinished séries from last week; revision fills the rest of the target
   const carry = carryOver(S, weekStart);
   // must = séries + checking them against the correction, plus anything unfinished from last week
-  const must = {}, corr = {}; let mustTotal = 0;
+  const must = {}, corr = {}, corrFrom = {}; let mustTotal = 0;
+  const prevWs = addDays(weekStart, -7), prevCfg = weekCfg(S0, prevWs);
   for (const su of S.subjects) {
-    const c = S.coursesOn && su.serie ? (+su.corr || 0) : 0;
+    // this week's correction only if it comes out before Sunday night; otherwise it moves to next week,
+    // and last week's late correction is checked this week
+    const deferred = corrDeferred(S0, weekStart, su);
+    const fromPrev = prevCfg.coursesOn && su.serie && corrDeferred(S0, prevWs, su) ? (+su.corr || 0) : 0;
+    const c = (S.coursesOn && su.serie && !deferred ? (+su.corr || 0) : 0) + fromPrev;
+    const av = corrAvail(S0, weekStart, su);
+    corrFrom[su.id] = fromPrev && !(S.coursesOn && su.serie && !deferred) ? null : (av && !deferred ? av : null);
     const v = (S.coursesOn ? (+su.serie || 0) : 0) + c + (carry[su.id] || 0);
     corr[su.id] = c;
     if (v > 0) { must[su.id] = v; mustTotal += v; }
@@ -362,7 +382,7 @@ function generate(S0, weekStart, now) {
       // a subject's correction check only comes once its série is fully placed
       const serieLeft = k => mustLeft[k] - (corrLeft[k] || 0);
       const mk = Object.keys(mustLeft).filter(k => mustLeft[k] >= 15 && subjOf(S, k));
-      const ck = mk.filter(k => serieLeft(k) < 15 && (corrLeft[k] || 0) >= 15);
+      const ck = mk.filter(k => serieLeft(k) < 15 && (corrLeft[k] || 0) >= 15 && (!corrFrom[k] || s.date >= corrFrom[k]));
       const sk = mk.filter(k => serieLeft(k) >= 15);
       if (ck.length) {
         ck.sort((a, b) => (lastByDay[s.d] === a) - (lastByDay[s.d] === b));
@@ -480,10 +500,11 @@ function generate(S0, weekStart, now) {
     }
     return out;
   };
-  function extendBy(need) {
+  function extendBy(need, fromDay) {
     const added = [];
     for (const pass of ['ext', 'day']) for (const x of days) {
       if (need < 15) return added;
+      if (x.d < (fromDay || 0)) continue;
       if (x.off || x.trip || (pass === 'day' && w[x.d] === 0)) continue;
       for (const c of x.chunk(freeParts(x, pass === 'ext' ? x.extGaps : x.gaps), need)) {
         const startT = x.date.getTime() + c.start * 6e4, endT = x.date.getTime() + c.end * 6e4;
@@ -502,7 +523,11 @@ function generate(S0, weekStart, now) {
   assignInto(future, mustLeft, carryLeft, revLeft, corrLeft);
   const leftNow = () => Object.values(mustLeft).reduce((a, b) => a + (b >= 25 ? b : 0), 0);
   for (let k = 0; k < 2 && leftNow() >= 25; k++) {
-    const more = extendBy(leftNow() + 20).sort((a, b) => a.startT - b.startT);
+    // if only corrections are left, extra time only helps on/after the day they come out
+    const leftK = Object.keys(mustLeft).filter(k => mustLeft[k] >= 25);
+    const onlyCorr = leftK.every(k => mustLeft[k] - (corrLeft[k] || 0) < 15 && corrFrom[k]);
+    const fromDay = onlyCorr && leftK.length ? Math.min(...leftK.map(k => Math.round((corrFrom[k] - weekStart) / 864e5))) : 0;
+    const more = extendBy(leftNow() + 20, fromDay).sort((a, b) => a.startT - b.startT);
     if (!more.length) break;
     assignInto(more, mustLeft, carryLeft, {}, corrLeft);
   }
