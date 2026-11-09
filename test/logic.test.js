@@ -49,3 +49,16 @@ console.log(bad?'FAIL '+bad:'OK');
  const me=w[2].ev.find(e=>e.title.startsWith('Examen blanc'));console.log('mercredi 18:',me&&me.title,L.fmt(me.start));
  S.noCourseWeeks=['2026-11-16'];const nc=L.generate(S,new Date(2026,10,16),new Date(2026,10,9));console.log('semaine sans cours:',nc.meta.cfg.coursesOn,'cours',nc.flatMap(x=>x.ev).filter(e=>e.kind==='course').length,'étude',L.hm(nc.reduce((a,x)=>a+x.plan,0)));}
 console.log(bad?'FAIL '+bad:'OK');
+// 9. switching chill → charbon on Wednesday keeps Mon/Tue as they were
+{const S=L.defaultState();S.since=0;S.mode='chill';const now=new Date(2026,10,11,12,0);const ws=L.mondayOf(now);
+ const before=L.generate(S,ws,now);const monBefore=before[0].ev.filter(e=>e.kind==='study').map(e=>L.fmt(e.start)+e.title).join('|');
+ L.freezePast(S,now);S.weekModes[L.iso(ws)]='charbon';
+ const after=L.generate(S,ws,now);const monAfter=after[0].ev.filter(e=>e.kind==='study').map(e=>L.fmt(e.start)+e.title).join('|');
+ if(monBefore!==monAfter)fail('past changed after mode switch');
+ console.log('chill→charbon mercredi: lundi identique',monBefore===monAfter,'| jeudi',L.hm(before[3].plan),'→',L.hm(after[3].plan),'| retard',L.hm(after.meta.lateMin),'| séries pas casées',after.meta.mustLeftAfter);
+ // then weekend off
+ L.freezePast(S,now);S.offDays.push('2026-11-14','2026-11-15');const wo=L.generate(S,ws,now);console.log('week-end off: sam',L.hm(wo[5].plan),'dim',L.hm(wo[6].plan),'| jeudi',L.hm(wo[3].plan),'| séries pas casées',wo.meta.mustLeftAfter);
+ let ov=0;for(const x of wo){const b=x.ev.filter(e=>e.end>e.start).sort((a,b)=>a.start-b.start);for(let i=1;i<b.length;i++)if(b[i].start<b[i-1].end){ov++;console.log('  ov',x.d,b[i-1].title,b[i].title)}}if(ov)fail('overlap after freeze');}
+// 10. migration v4 → v5 Saturday laundry
+{const S=L.normalize({v:4,routines:[{id:'a',day:5,start:690,end:780,title:'Courses',kind:'other'},{id:'b',day:5,start:600,end:645,title:'Sport',kind:'sport'}]});console.log('samedi:',S.routines.filter(r=>r.day===5).map(r=>L.fmt(r.start)+' '+r.title).join(' / '));}
+console.log(bad?'FAIL '+bad:'OK');

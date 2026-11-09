@@ -58,7 +58,7 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other' });
   return {
-    v: 4, mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 5, mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -76,7 +76,7 @@ function defaultState() {
     ],
     routines: [
       R(1, 1035, 1095, 'Sport', 'sport'), R(3, 1050, 1110, 'Sport', 'sport'), R(5, 600, 645, 'Sport', 'sport'),
-      R(5, 690, 780, 'Courses'),
+      R(5, 660, 765, 'Lessive + courses (lancer la machine, courses, ranger, étendre)'),
       R(6, 540, 780, 'Lessive, nettoyage, cuisine'),
       R(6, 1215, 1260, 'Préparer la semaine (sac, lunch, cours de lundi)')
     ],
@@ -111,6 +111,11 @@ function normalize(s) {
     if (old.coursesOn === false) out.noCourseWeeks = [iso(mondayOf(new Date()))];
     out.coursesOn = true;
   }
+  if ((old.v || 0) < 5) {
+    // v4 → v5: Saturday is laundry #1 started before groceries (about 1h15 of laundry overall)
+    out.routines = (out.routines || []).filter(r => !(r.day === 5 && r.kind !== 'sport' && /courses|lessive/i.test(r.title)));
+    out.routines.push({ id: uid(), day: 5, start: 660, end: 765, title: 'Lessive + courses (lancer la machine, courses, ranger, étendre)', kind: 'other' });
+  }
   out.modes = Object.assign({}, clone(MODE_DEFAULTS), out.modes || {});
   for (const k of MODE_ORDER) out.modes[k] = Object.assign({}, MODE_DEFAULTS[k], out.modes[k] || {});
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
@@ -118,8 +123,9 @@ function normalize(s) {
   out.done = out.done || {};
   ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
+  if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
-  out.v = 4;
+  out.v = 5;
   return out;
 }
 
@@ -306,6 +312,16 @@ function generate(S0, weekStart, now) {
     placed[i].forEach(c => slots.push(Object.assign(c, { d: x.d, date: x.date, startT: x.date.getTime() + c.start * 6e4, endT: x.date.getTime() + c.end * 6e4, campus: !x.we && x.courses.length && c.start >= x.firstC && x.goHome != null && c.start < x.goHome })));
   });
 
+  // the part of the week already lived keeps the plan it had (a mode change, a day off or a new event
+  // only reshapes what's still ahead)
+  const fz = (S.frozen || {})[key];
+  let frozen = [];
+  if (fz && fz.until && Array.isArray(fz.items)) {
+    frozen = fz.items.filter(it => days[it.d]).map(it => { const x = days[it.d]; return { d: it.d, date: x.date, start: it.start, end: it.end, len: it.end - it.start, startT: x.date.getTime() + it.start * 6e4, endT: x.date.getTime() + it.end * 6e4, title: it.title, subj: it.subj, serie: !!it.serie, late: !!it.late, catchup: !!it.catchup, campus: !!it.campus, frozen: true }; });
+    const cut = Math.max(fz.until, ...frozen.map(f => f.endT));
+    for (let i = slots.length - 1; i >= 0; i--) if (slots[i].startT < cut) slots.splice(i, 1);
+  }
+
   // revision budget by subject
   const revPool = Math.max(0, T - mustTotal);
   const ws = S.subjects.map(su => examWeight(S, su, addDays(weekStart, 3)));
@@ -388,6 +404,17 @@ function generate(S0, weekStart, now) {
   const idOf = (d, s) => d + '-' + s.start + '-study';
   const future = [], live = [];
   let lateMin = 0;
+  for (const f of frozen) {
+    const id = idOf(f.d, f), rec = doneMap[id];
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, f, { id, title: rec.t || f.title, subj: rec.s, state: 'done' }));
+    else if (f.endT <= nowT) { const pre = f.endT <= sinceT; if (!pre) lateMin += f.len; live.push(Object.assign({}, f, { id, state: pre ? 'pre' : 'missed' })); }
+    else {
+      // block in progress at the moment of the change: keeps its task, which comes off the budgets
+      live.push(Object.assign({}, f, { id, state: 'todo' }));
+      if (f.subj && f.serie) { mustLeft[f.subj] = Math.max(0, (mustLeft[f.subj] || 0) - f.len); }
+      else if (f.subj) revLeft[f.subj] = Math.max(0, (revLeft[f.subj] || 0) - f.len);
+    }
+  }
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
     const b = base[i];
@@ -399,7 +426,7 @@ function generate(S0, weekStart, now) {
     } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
   });
   // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were
-  const slotIds = new Set(slots.map(s => idOf(s.d, s)));
+  const slotIds = new Set(slots.concat(frozen).map(s => idOf(s.d, s)));
   for (const [id, rec] of Object.entries(doneMap)) {
     if (slotIds.has(id) || !rec || typeof rec !== 'object' || rec.d == null || rec.a == null) continue;
     const x = days[rec.d]; if (!x) continue;
@@ -475,7 +502,7 @@ function generate(S0, weekStart, now) {
     x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
     x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);
   }
-  days.meta = { cfg, T, mustTotal, carry, lateMin, extended, unplaced, mustLeftAfter, sportMin: sportMinutes(S) };
+  days.meta = { cfg, T, mustTotal, mustAllDone: mustTotal > 0 && mustNeeded === 0, carry, lateMin, extended, unplaced, mustLeftAfter, sportMin: sportMinutes(S) };
   return days;
 }
 
@@ -560,6 +587,18 @@ function buildAgenda(S, now, nDays) {
   return out.sort((a, b) => a.s - b.s).slice(0, 40);
 }
 
-const API = { tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+/* Snapshot of what was planned up to `now` for the current week — taken before any change */
+function freezePast(S, now) {
+  now = now || new Date();
+  const ws = mondayOf(now), key = iso(ws);
+  if (now.getTime() <= ws.getTime() + 60e3) return;
+  const days = generate(S, ws, now);
+  const items = [];
+  for (const x of days) for (const e of x.ev) if (e.kind === 'study' && x.date.getTime() + e.start * 6e4 < now.getTime())
+    items.push({ d: x.d, start: e.start, end: e.end, title: e.title, subj: e.subj, serie: e.serie, late: e.late, catchup: e.catchup, campus: /EPFL/.test(e.sub || '') });
+  S.frozen = { [key]: { until: now.getTime(), items } };
+}
+
+const API = { freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

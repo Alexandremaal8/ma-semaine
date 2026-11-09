@@ -96,7 +96,7 @@ function openSheet(title, html, onSubmit) {
 }
 function closeSheet() { $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
-$('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
+$('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { L.freezePast(state); const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
 
 const F = {
   text: (n, l, v, cls = 'full', ph = '') => `<div class="f ${cls}"><label for="f-${n}">${l}</label><input id="f-${n}" name="${n}" type="text" value="${esc(v)}" placeholder="${esc(ph)}"></div>`,
@@ -186,6 +186,13 @@ function editEvent(id, date) {
     calSel = obj.date; return done();
   });
 }
+function weekendOff(wk) {
+  const sat = iso(addDays(fromIso(wk), 5)), sun = iso(addDays(fromIso(wk), 6));
+  const on = state.offDays.includes(sat) && state.offDays.includes(sun);
+  state.offDays = state.offDays.filter(x => x !== sat && x !== sun);
+  if (!on) state.offDays.push(sat, sun);
+  toast(on ? 'Week-end off annulé' : 'Week-end off : la semaine s’adapte'); done();
+}
 function toggleOff(di) {
   const i = state.offDays.indexOf(di);
   if (i >= 0) { state.offDays.splice(i, 1); toast('Jour off annulé'); }
@@ -253,7 +260,8 @@ function modeSheet(wk) {
     ${rec ? `<div class="rec"><b>Conseil : mode ${MODE_META[rec.mode].name}.</b> ${esc(rec.why)}</div>` : ''}
     <div class="group" style="margin-bottom:12px"><label class="row-sw"><span class="bd"><span class="ti">J’ai cours cette semaine</span><span class="su">Sinon : semaine de travail sans cours, ni séries</span></span><input type="checkbox" class="sw" data-courses="${wk}" ${cfg.coursesOn ? 'checked' : ''}${cfg.tripDays >= 3 ? ' disabled' : ''}></label></div>
     <div class="modes" role="radiogroup">${MODE_ORDER.map(k => `<button type="button" class="mopt" role="radio" aria-checked="${k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}${rec && rec.mode === k ? ' <em class="badge">conseillé</em>' : ''}</b><small>${esc(MODE_META[k].tag)}</small></span></button>`).join('')}</div>
-    <button type="button" class="linkbtn" data-act="tuneMode" data-v="${cfg.mode}">Ajuster le mode ${esc(MODE_META[cfg.mode].name)}</button>`);
+    <div class="day-actions"><button type="button" class="linkbtn" data-act="weekendOff" data-v="${wk}">${state.offDays.includes(iso(addDays(fromIso(wk), 5))) && state.offDays.includes(iso(addDays(fromIso(wk), 6))) ? 'Annuler le week-end off' : 'Prendre le week-end off'}</button><button type="button" class="linkbtn" data-act="tuneMode" data-v="${cfg.mode}">Ajuster le mode ${esc(MODE_META[cfg.mode].name)}</button></div>
+    <p class="hint" style="text-align:center;margin-top:12px">Tu peux changer en pleine semaine : ce qui est passé ne bouge pas, seul ce qui reste s’adapte.</p>`);
 }
 function tuneMode(mk) {
   mk = MODE_ORDER.includes(mk) ? mk : cfgOf(wkOf(selDate)).mode;
@@ -363,8 +371,12 @@ function renderToday() {
   }
   // advice before a trip or after it (once per week, only if the current mode differs)
   let advice = '';
+  if (thisWeek && M.mustAllDone && !pickWeek) {
+    const weOff = state.offDays.includes(iso(addDays(ws, 5))) && state.offDays.includes(iso(addDays(ws, 6)));
+    advice = `<div class="notice"><span><b>Toutes tes séries de la semaine sont faites.</b> Tu peux continuer, ou lever le pied.</span>${wmode !== 'chill' ? `<button type="button" data-act="setMode" data-v="chill" data-w="${key}">Chill</button>` : ''}${weOff ? '' : `<button type="button" data-act="weekendOff" data-v="${key}">Week-end off</button>`}</div>`;
+  }
   const recNow = thisWeek ? L.recommendMode(state, ws) : null;
-  if (recNow && recNow.mode !== wmode && !pickWeek) advice = `<div class="notice"><span><b>Conseil : mode ${MODE_META[recNow.mode].name}.</b> ${esc(recNow.why)}</span><button type="button" data-act="setMode" data-v="${recNow.mode}" data-w="${key}">Passer</button></div>`;
+  if (recNow && recNow.mode !== wmode && !pickWeek && !advice) advice = `<div class="notice"><span><b>Conseil : mode ${MODE_META[recNow.mode].name}.</b> ${esc(recNow.why)}</span><button type="button" data-act="setMode" data-v="${recNow.mode}" data-w="${key}">Passer</button></div>`;
   else if (thisWeek && M.lateMin >= 15) late = `<div class="notice"><span><b>${hm(M.lateMin)} pas faits</b> cette semaine : c’est déjà replacé${M.extended ? ', avec ' + hm(M.extended) + ' de rattrapage' : ''}.</span></div>`;
   const st = main.filter(e => e.kind === 'study'), stDone = st.filter(e => e.state === 'done');
   const prog = st.length ? `<div class="prog"><span><b>${stDone.length}/${st.length}</b> blocs</span><span class="track"><i style="width:${stDone.length / st.length * 100}%"></i></span><span class="num">${hm(day.dn)} / ${hm(day.plan)}</span></div>` : '';
@@ -546,10 +558,12 @@ async function copyText(txt, okMsg) {
 }
 
 /* ---------- Events ---------- */
+const MUTATING = new Set(['setMode', 'offDay', 'weekendOff', 'importDo']);
 document.addEventListener('click', async e => {
   const nb = e.target.closest('.nav button'); if (nb) { showTab(nb.dataset.tab); return; }
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
+  if (MUTATING.has(a)) L.freezePast(state);
   switch (a) {
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
@@ -567,6 +581,7 @@ document.addEventListener('click', async e => {
       save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;
     }
     case 'offDay': toggleOff(v); closeSheet(); return;
+    case 'weekendOff': weekendOff(v); closeSheet(); return;
     case 'hoursSheet': hoursSheet(); return;
     case 'modeSheet': modeSheet(b.dataset.w); return;
     case 'setMode': { const wk = b.dataset.w || wkOf(selDate); state.weekModes[wk] = v; if (wk >= iso(mondayOf(new Date()))) state.mode = v; save(); renderAll(); closeSheet(); toast('Mode ' + MODE_META[v].name + (wk === iso(mondayOf(new Date())) ? '' : ' pour la semaine du ' + dateLbl(fromIso(wk)))); return; }
@@ -599,6 +614,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (t.dataset.courses) L.freezePast(state);
   if (t.dataset.courses) {
     const wk = t.dataset.courses; state.noCourseWeeks = state.noCourseWeeks.filter(x => x !== wk);
     if (!t.checked) state.noCourseWeeks.push(wk);
