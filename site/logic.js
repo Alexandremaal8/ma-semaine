@@ -1,34 +1,41 @@
-/* Ma semaine EPFL — planning logic (no DOM). Shared by the app and the tests. */
+/* EPFL Calendar — planning logic (no DOM). Shared by the app and the tests.
+ * Model: each mode sets a weekly study target. It is spread automatically over the days in proportion to
+ * the free time each day has (days off get nothing). The week's séries must all be finished; what isn't
+ * checked off by the end of a block moves to the next free blocks, then to a bounded catch-up time in the
+ * evenings, and whatever is left at the end of the week carries into the next one. */
 (function (root) {
 'use strict';
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 const DAYS_S = ['Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa', 'Di'];
 const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const MONTHS_L = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
-const MODE_ORDER = ['chill', 'normal', 'charbon', 'exam', 'recup'];
+const MODE_ORDER = ['chill', 'normal', 'charbon', 'rattrapage', 'exam', 'recup'];
 const MODE_META = {
-  chill: { name: 'Chill', tag: 'Le minimum pour suivre. Soirées longues et samedi off.' },
-  normal: { name: 'Normal', tag: 'Rythme de croisière : séries à jour, sport trois fois, soirées à toi.' },
-  charbon: { name: 'Charbon', tag: 'Grosse semaine. Tu restes à l’EPFL jusqu’au soir et presque tout le temps libre passe en étude. Le sommeil, lui, ne bouge pas.' },
-  exam: { name: 'Exam', tag: 'Révisions. Les matières dont l’examen approche passent devant, priorité aux annales et à la révision active.' },
-  recup: { name: 'Récup', tag: 'Fatigué ou malade : le strict minimum, beaucoup de sommeil, un peu d’air.' }
+  chill: { name: 'Chill', tag: 'Les séries et un peu de révision. Samedi off, soirées longues.' },
+  normal: { name: 'Normal', tag: 'Séries finies chaque semaine, révisions régulières, soirées à toi.' },
+  charbon: { name: 'Charbon', tag: 'Grosse semaine : presque tout le temps libre passe en étude. Le sommeil ne bouge pas.' },
+  rattrapage: { name: 'Rattrapage', tag: 'T’as pris du retard : on le rattrape en priorité, un peu chaque soir, sans te cramer.' },
+  exam: { name: 'Exam', tag: 'Révisions. Les matières dont l’examen approche passent devant.' },
+  recup: { name: 'Récup', tag: 'Fatigué ou malade : le strict minimum. Ce qui ne rentre pas passe à la semaine suivante.' }
 };
+/* week: weekly study minutes · sat/sun: share of a weekday · ext: max catch-up minutes added per evening */
 const MODE_DEFAULTS = {
-  chill:   { wake: 480, wakeWE: 570, sleep: 1410, studyDay: 120, sat: 0,   sun: 120, block: 45, pause: 15, sportDays: [1, 3, 5], sportMin: 75, sportLabel: 'Sport', freeEve: 150 },
-  normal:  { wake: 450, wakeWE: 510, sleep: 1380, studyDay: 210, sat: 150, sun: 120, block: 50, pause: 10, sportDays: [1, 3, 5], sportMin: 60, sportLabel: 'Sport', freeEve: 90 },
-  charbon: { wake: 405, wakeWE: 480, sleep: 1380, studyDay: 330, sat: 330, sun: 240, block: 50, pause: 10, sportDays: [2, 5],    sportMin: 60, sportLabel: 'Sport (vider la tête)', freeEve: 45 },
-  exam:    { wake: 450, wakeWE: 480, sleep: 1380, studyDay: 360, sat: 360, sun: 300, block: 50, pause: 10, sportDays: [1, 3, 5], sportMin: 45, sportLabel: 'Sport court', freeEve: 60 },
-  recup:   { wake: 510, wakeWE: 600, sleep: 1365, studyDay: 60,  sat: 0,   sun: 60,  block: 30, pause: 15, sportDays: [2, 5],    sportMin: 30, sportLabel: 'Marche au bord du lac', freeEve: 180 }
+  chill:      { week: 720,  sat: 0,   sun: 0.5, block: 45, pause: 15, freeEve: 150, ext: 30 },
+  normal:     { week: 1200, sat: 0.6, sun: 0.6, block: 50, pause: 10, freeEve: 90,  ext: 45 },
+  charbon:    { week: 1920, sat: 1,   sun: 0.8, block: 50, pause: 10, freeEve: 45,  ext: 60 },
+  rattrapage: { week: 1440, sat: 1,   sun: 0.7, block: 50, pause: 10, freeEve: 120, ext: 75 },
+  exam:       { week: 2100, sat: 1,   sun: 1,   block: 50, pause: 10, freeEve: 60,  ext: 60 },
+  recup:      { week: 360,  sat: 0,   sun: 0.3, block: 30, pause: 15, freeEve: 180, ext: 0 }
 };
-const LABELS = {
-  chill: ['Série d’exercices', 'Relire le cours'],
-  normal: ['Série d’exercices', 'Relire + fiche résumé'],
-  charbon: ['Série d’exercices', 'Fiches + exos en plus', 'Refaire les exos ratés'],
-  exam: ['Annales / examen blanc', 'Révision active (fiches, flashcards)', 'Refaire les séries'],
-  recup: ['Relire tranquillement']
+const REV_LABELS = {
+  chill: ['Relire le cours'], normal: ['Relire + fiche résumé', 'Exos en plus'],
+  charbon: ['Fiches + exos en plus', 'Refaire les exos ratés'], rattrapage: ['Relire le cours'],
+  exam: ['Annales / examen blanc', 'Révision active (fiches, flashcards)', 'Refaire les séries'], recup: ['Relire tranquillement']
 };
 const PRIO_W = [0, 1, 1.6, 2.3];
 const COMMUTE = 40;
+const MIN_FREE_EVE = 45;
+const SPORT_MIN = 120, SPORT_MAX = 180;
 
 const clone = o => JSON.parse(JSON.stringify(o));
 const pad = n => String(n).padStart(2, '0');
@@ -42,18 +49,20 @@ const mondayOf = d => { const x = new Date(d.getFullYear(), d.getMonth(), d.getD
 const dateLbl = d => d.getDate() + ' ' + MONTHS[d.getMonth()];
 const uid = () => Math.random().toString(36).slice(2, 9);
 const dow = d => (d.getDay() + 6) % 7;
+const subjOf = (S, id) => S.subjects.find(x => x.id === id);
 
 function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
-  const R = (day, s, e, title) => ({ id: uid(), day, start: s, end: e, title });
+  const R = (day, s, e, title, kind) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other' });
   return {
-    v: 2, mode: 'normal', coursesOn: true,
+    v: 3, mode: 'normal', coursesOn: true, since: Date.now(),
+    wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
-      { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '' },
-      { id: 'alg', name: 'Algèbre linéaire', color: '#1D4ED8', prio: 3, exam: '' },
-      { id: 'phy', name: 'Physique (mécanique)', color: '#047857', prio: 2, exam: '' },
-      { id: 'aicc', name: 'AICC I', color: '#7C3AED', prio: 2, exam: '' },
-      { id: 'prog', name: 'Programmation', color: '#0E7490', prio: 2, exam: '' }
+      { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180 },
+      { id: 'alg', name: 'Algèbre linéaire', color: '#1D4ED8', prio: 3, exam: '', serie: 180 },
+      { id: 'phy', name: 'Physique (mécanique)', color: '#047857', prio: 2, exam: '', serie: 150 },
+      { id: 'aicc', name: 'AICC I', color: '#7C3AED', prio: 2, exam: '', serie: 150 },
+      { id: 'prog', name: 'Programmation', color: '#0E7490', prio: 2, exam: '', serie: 120 }
     ],
     courses: [
       C(0, 615, 720, 'ana', 'Cours', 'CM 1 2 / CO 3'), C(0, 975, 1140, 'phy', 'Cours', 'CE 1 6'),
@@ -63,12 +72,12 @@ function defaultState() {
       C(4, 495, 600, 'alg', 'Exercices', ''), C(4, 615, 720, 'aicc', 'Exercices', ''), C(4, 795, 900, 'prog', 'Exercices', ''), C(4, 915, 960, 'prog', 'Cours', 'INF')
     ],
     routines: [
-      R(5, 570, 660, 'Courses + lessive'),
+      R(1, 1035, 1095, 'Sport', 'sport'), R(3, 1050, 1110, 'Sport', 'sport'), R(5, 600, 645, 'Sport', 'sport'),
+      R(5, 690, 780, 'Courses + lessive'),
       R(6, 705, 840, 'Cuisiner les lunchs de la semaine'),
       R(6, 1215, 1260, 'Préparer la semaine (sac, lunch, cours de lundi)')
     ],
-    deadlines: [],
-    events: [],
+    events: [], offDays: [],
     modes: clone(MODE_DEFAULTS),
     notif: { on: false, course: 10, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
     done: {}
@@ -77,223 +86,350 @@ function defaultState() {
 
 function normalize(s) {
   const d = defaultState();
-  const out = Object.assign({}, d, s || {});
+  const old = s || {};
+  const out = Object.assign({}, d, old);
+  if ((old.v || 0) < 3) {
+    // v2 → v3: fixed wake/sleep, sport moves to routines, séries per subject, new modes
+    out.wake = d.wake; out.sleep = d.sleep; out.wakeWE = d.wakeWE; out.sleepSat = d.sleepSat;
+    out.modes = clone(MODE_DEFAULTS);
+    const defSerie = { ana: 180, alg: 180, phy: 150, aicc: 150, prog: 120 };
+    out.subjects = (old.subjects || d.subjects).map(x => Object.assign({ serie: defSerie[x.id] || 120 }, x));
+    const rs = (old.routines || []).map(r => Object.assign({ kind: 'other' }, r));
+    if (!rs.some(r => r.kind === 'sport')) rs.unshift(...d.routines.filter(r => r.kind === 'sport'));
+    out.routines = rs;
+    out.done = {}; out.since = Date.now();
+  }
   out.modes = Object.assign({}, clone(MODE_DEFAULTS), out.modes || {});
   for (const k of MODE_ORDER) out.modes[k] = Object.assign({}, MODE_DEFAULTS[k], out.modes[k] || {});
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
   out.notif = Object.assign({}, d.notif, out.notif || {});
   out.done = out.done || {};
-  ['subjects', 'courses', 'routines', 'deadlines', 'events'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
-  out.v = 2;
+  ['subjects', 'courses', 'routines', 'events', 'offDays'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
+  out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; });
+  out.v = 3;
   return out;
 }
 
-const subjOf = (S, id) => S.subjects.find(x => x.id === id);
+const sportMinutes = S => S.routines.filter(r => r.kind === 'sport').reduce((a, r) => a + Math.max(0, r.end - r.start), 0);
 
-function generate(S, weekStart) {
-  const m = S.modes[S.mode];
-  const days = [], slots = [];
-  for (let d = 0; d < 7; d++) {
-    const date = addDays(weekStart, d), we = d >= 5, dIso = iso(date);
-    const courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start).sort((a, b) => a.start - b.start) : [];
-    const firstC = courses.length ? courses[0].start : null;
-    const lastC = courses.length ? Math.max(...courses.map(c => c.end)) : null;
-    const wake = firstC != null ? Math.min(we ? m.wakeWE : m.wake, firstC - 30 - COMMUTE - 15) : (we ? m.wakeWE : m.wake);
-    let sleep = m.sleep; if (sleep < 240) sleep += 1440; if (sleep > 1440) sleep = 1440;
-    const ev = [];
-    const busy = () => ev.filter(e => e.end > e.start);
-    const free = (s, e) => busy().every(b => b.end <= s || b.start >= e);
-    ev.push({ kind: 'mark', start: wake, end: wake, title: 'Réveil ' + fmt(wake) });
-    ev.push({ kind: 'meal', start: wake, end: wake + 30, title: 'Petit-déj' });
-    courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type, c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
-    // one-off events and weekly routines are fixed
-    (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
-    (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r => { if (free(r.start, r.end)) ev.push({ kind: 'routine', start: r.start, end: r.end, title: r.title }); });
-    // commute
-    let goHome = null;
-    if (courses.length) {
-      if (free(firstC - COMMUTE - 5, firstC - 5)) ev.push({ kind: 'move', start: firstC - COMMUTE - 5, end: firstC - 5, title: 'Maison → EPFL' });
-      let ret = S.mode === 'charbon' ? Math.max(lastC, 1110) : lastC;
-      for (let k = 0; k < 6 && !free(ret, ret + COMMUTE); k++) ret += 15;
-      goHome = ret;
-      ev.push({ kind: 'move', start: ret, end: ret + COMMUTE, title: 'EPFL → maison' });
-    }
-    for (const s of [720, 735, 705, 750, 780, 795, 690]) if (free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: courses.some(c => c.start < s + 120 && c.end > s - 60) ? 'Midi à l’EPFL' : 'Midi' }); break; }
-    const wind = sleep - 30;
-    ev.push({ kind: 'rest', start: wind, end: sleep, title: 'Écrans off, routine du soir' });
-    let dinner = null;
-    for (const s of [1140, 1155, 1170, 1185, 1200, 1110, 1095]) if (s + 45 <= wind && free(s, s + 45)) { dinner = { kind: 'meal', start: s, end: s + 45, title: 'Souper' }; ev.push(dinner); break; }
-    let eveStart = wind - m.freeEve;
-    if (m.freeEve > 0) {
-      const FT = { kind: 'free', title: 'Temps libre', sub: 'guitare, potes, série…' };
-      if (dinner && eveStart < dinner.end && eveStart >= dinner.start) eveStart = dinner.end;
-      // never put free time on top of a fixed thing
-      const pieces = [];
-      let t = eveStart;
-      for (const b of busy().filter(b => b.end > eveStart && b.start < wind).sort((a, b) => a.start - b.start)) { if (b.start > t) pieces.push([t, b.start]); t = Math.max(t, b.end); }
-      if (t < wind) pieces.push([t, wind]);
-      pieces.filter(p => p[1] - p[0] >= 15).forEach(p => ev.push(Object.assign({}, FT, { start: p[0], end: p[1] })));
-    }
-    const studyEnd = Math.min(eveStart, wind);
-    if ((m.sportDays || []).includes(d) && m.sportMin > 0) {
-      const L = +m.sportMin;
-      const cands = we ? [630, 690, 960, 1020, 900] : [1035, 1080, 1020, 975, 1110, 1200, 750];
-      for (const s of cands) if (s >= wake + 30 && s + L <= studyEnd && free(s, s + L)) { ev.push({ kind: 'sport', start: s, end: s + L, title: m.sportLabel || 'Sport', sub: we ? '' : 'Centre sportif UNIL-EPFL' }); break; }
-    }
-    const target = we ? (d === 5 ? +m.sat : +m.sun) : +m.studyDay;
-    const gaps = [];
-    {
-      const bs = busy().filter(b => b.end > wake + 30 && b.start < studyEnd).sort((a, b) => a.start - b.start);
-      let t = wake + 30;
-      for (const b of bs) { if (b.start > t) gaps.push({ s: t, e: b.start }); t = Math.max(t, b.end); }
-      if (studyEnd > t) gaps.push({ s: t, e: studyEnd });
-    }
-    if (we && target === 0) gaps.forEach(g => { if (g.e - g.s >= 30) ev.push({ kind: 'free', start: g.s, end: g.e, title: 'Journée off', sub: 'zéro cours, zéro série' }); });
-    let remaining = target;
-    if (target > 0) for (const g of gaps) {
+/* ---------- one day: fixed events + the free windows where study can go ---------- */
+function layoutDay(S, m, weekStart, d) {
+  const date = addDays(weekStart, d), we = d >= 5, dIso = iso(date);
+  const off = (S.offDays || []).includes(dIso);
+  const courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start).sort((a, b) => a.start - b.start) : [];
+  const firstC = courses.length ? courses[0].start : null;
+  const lastC = courses.length ? Math.max(...courses.map(c => c.end)) : null;
+  const wake = firstC != null ? Math.min(we ? S.wakeWE : S.wake, firstC - 30 - COMMUTE - 15) : (we ? S.wakeWE : S.wake);
+  let sleep = d === 5 ? S.sleepSat : S.sleep; if (sleep < 240) sleep += 1440; if (sleep > 1440) sleep = 1440;
+  const ev = [];
+  const busy = () => ev.filter(e => e.end > e.start);
+  const free = (s, e) => busy().every(b => b.end <= s || b.start >= e);
+  ev.push({ kind: 'meal', start: wake, end: wake + 30, title: 'Petit-déj' });
+  courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type, c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
+  (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
+  (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r => { if (free(r.start, r.end)) ev.push({ kind: r.kind === 'sport' ? 'sport' : 'routine', start: r.start, end: r.end, title: r.title, rid: r.id }); });
+  let goHome = null;
+  if (courses.length) {
+    if (free(firstC - COMMUTE - 5, firstC - 5)) ev.push({ kind: 'move', start: firstC - COMMUTE - 5, end: firstC - 5, title: 'Maison → EPFL' });
+    let ret = S.mode === 'charbon' ? Math.max(lastC, 1110) : lastC;
+    for (let k = 0; k < 8 && !free(ret, ret + COMMUTE); k++) ret += 15;
+    goHome = ret;
+    ev.push({ kind: 'move', start: ret, end: ret + COMMUTE, title: 'EPFL → maison' });
+  }
+  for (const s of [720, 735, 705, 750, 780, 795, 690]) if (free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: courses.some(c => c.start < s + 120 && c.end > s - 60) ? 'Midi à l’EPFL' : 'Midi' }); break; }
+  const wind = sleep - 30;
+  ev.push({ kind: 'rest', start: wind, end: sleep, title: 'Écrans off, routine du soir' });
+  for (const s of [1140, 1155, 1170, 1185, 1200, 1110, 1095]) if (s + 45 <= wind && free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: 'Souper' }); break; }
+  const eveStart = Math.max(wake + 30, wind - m.freeEve);
+  // catch-up window: the first part of the free evening, never below MIN_FREE_EVE of real free time
+  const extEnd = Math.min(eveStart + (+m.ext || 0), wind - MIN_FREE_EVE);
+  const gapsIn = (lo, hi) => {
+    const out = []; let t = lo;
+    for (const b of busy().filter(b => b.end > lo && b.start < hi).sort((a, b) => a.start - b.start)) { if (b.start > t) out.push({ s: t, e: b.start }); t = Math.max(t, b.end); }
+    if (hi > t) out.push({ s: t, e: hi });
+    return out;
+  };
+  const gaps = off ? [] : gapsIn(wake + 30, eveStart);
+  const extGaps = off || extEnd <= eveStart ? [] : gapsIn(eveStart, extEnd);
+  const chunk = (gs, limit) => {
+    const res = []; let left = limit;
+    for (const g of gs) {
       let t = g.s;
-      while (remaining >= 20) {
-        const len = Math.min(+m.block, g.e - t, remaining);
-        if (len < 30 && !(len === remaining && len >= 20)) break;
-        const prevC = courses.find(c => c.end <= t && c.end >= t - 60);
-        const campus = !we && courses.length && t >= firstC && goHome != null && t < goHome;
-        slots.push({ d, date, start: t, end: t + len, len, prevC, campus, startT: date.getTime() + t * 6e4, endT: date.getTime() + (t + len) * 6e4 });
-        remaining -= len; t += len + (+m.pause);
+      while (left >= 20) {
+        const len = Math.min(+m.block, g.e - t, left);
+        if (len < 30 && !(len === left && len >= 20)) break;
+        res.push({ start: t, end: t + len, len });
+        left -= len; t += len + (+m.pause);
         if (t + 20 > g.e) break;
       }
-      if (remaining < 20) break;
+      if (left < 20) break;
     }
-    if (we && target > 0) {
-      const daySlots = slots.filter(x => x.d === d);
-      for (const g of gaps) {
-        let t = g.s;
-        for (const x of daySlots.filter(x => x.start >= g.s && x.end <= g.e)) t = Math.max(t, x.end + (+m.pause));
-        if (g.e - t >= 90) ev.push({ kind: 'free', start: t, end: g.e, title: 'Libre', sub: 'le reste est à toi' });
-      }
-    }
-    days.push({ d, date, wake, sleep, ev, target, shortfall: remaining >= 20 ? remaining : 0 });
-  }
-  assign(S, slots);
-  for (const s of slots) {
-    const su = subjOf(S, s.subj);
-    const sub = [su ? su.name : '', s.campus ? 'à l’EPFL' : ''].filter(Boolean).join(' · ');
-    days[s.d].ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title, sub, subj: s.subj, deadline: s.deadline, dueLbl: s.dueLbl });
-  }
-  for (const day of days) {
-    day.ev.sort((a, b) => a.start - b.start || (a.kind === 'mark' ? -1 : b.kind === 'mark' ? 1 : 0));
-    day.ev.forEach(e => { e.id = day.d + '-' + e.start + '-' + e.kind; });
-  }
-  return days;
+    return res;
+  };
+  const cap = chunk(gaps, Infinity).reduce((a, x) => a + x.len, 0);
+  return { d, date, dIso, we, off, wake, sleep, wind, eveStart, ev, courses, firstC, goHome, gaps, extGaps, chunk, cap };
 }
 
-function assign(S, slots) {
-  const subs = S.subjects;
-  if (!subs.length) { slots.forEach(s => { s.title = 'Étude'; s.subj = null; }); return; }
-  const assigned = {}; let total = 0;
-  const give = (s, id, title) => { s.subj = id; s.title = title; assigned[id] = (assigned[id] || 0) + s.len; total += s.len; };
-  const ws = slots.length ? slots[0].startT : 0;
-  const dls = S.deadlines.filter(x => x.due && subjOf(S, x.subj)).map(x => ({ ...x, dueT: new Date(x.due).getTime(), need: Math.round((+x.hours || 0) * 60) }))
-    .filter(x => x.need > 0 && x.dueT > ws).sort((a, b) => a.dueT - b.dueT);
-  for (const dl of dls) {
-    const win = dl.dueT - 4 * 864e5;
-    const c = slots.filter(s => !s.subj && s.endT <= dl.dueT);
-    const inW = c.filter(s => s.startT >= win).sort((a, b) => a.startT - b.startT);
-    const outW = c.filter(s => s.startT < win).sort((a, b) => b.startT - a.startT);
-    const due = new Date(dl.dueT);
-    const lbl = DAYS[dow(due)].toLowerCase() + ' ' + fmt(due.getHours() * 60 + due.getMinutes());
-    const perDay = {};
-    for (const pass of [2, 99]) for (const s of inW.concat(outW)) {
-      if (dl.need <= 0) break; if (s.subj || (perDay[s.d] || 0) >= pass) continue;
-      give(s, dl.subj, dl.title); s.deadline = true; s.dueLbl = 'pour ' + lbl; dl.need -= s.len; perDay[s.d] = (perDay[s.d] || 0) + 1;
+/* ---------- requirements for the week ---------- */
+function examWeight(S, su, date) {
+  let b = 1;
+  if (su.exam) {
+    const dd = (fromIso(su.exam) - date) / 864e5;
+    if (dd < 0) b = .05; else if (dd <= 3) b = 4; else if (dd <= 7) b = 2.6; else if (dd <= 14) b = 1.7; else if (dd <= 28) b = 1.2;
+  } else if (S.mode === 'exam') b = .35;
+  return (PRIO_W[su.prio] || 1) * b;
+}
+function doneBySubject(S, key) {
+  const out = {}; let total = 0;
+  for (const v of Object.values(S.done[key] || {})) if (v && typeof v === 'object' && v.m) { out[v.s || '_'] = (out[v.s || '_'] || 0) + v.m; total += v.m; }
+  return { by: out, total };
+}
+/* Séries from last week that were never finished. Only counts if the app was used that week. */
+function carryOver(S, weekStart) {
+  const prevKey = iso(addDays(weekStart, -7));
+  if (!S.done[prevKey] || !S.coursesOn) return {};
+  const done = doneBySubject(S, prevKey).by, out = {};
+  for (const su of S.subjects) { const left = (su.serie || 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
+  return out;
+}
+
+function generate(S, weekStart, now) {
+  now = now || new Date();
+  const m = S.modes[S.mode];
+  const key = iso(weekStart);
+  const nowT = now.getTime();
+  const sinceT = S.since || 0;
+  const days = []; for (let d = 0; d < 7; d++) days.push(layoutDay(S, m, weekStart, d));
+
+  // must = this week's séries + unfinished séries from last week; revision fills the rest of the target
+  const carry = carryOver(S, weekStart);
+  const must = {}; let mustTotal = 0;
+  for (const su of S.subjects) { const v = (S.coursesOn ? (+su.serie || 0) : 0) + (carry[su.id] || 0); if (v > 0) { must[su.id] = v; mustTotal += v; } }
+  const T = S.mode === 'recup' ? Math.min(+m.week, mustTotal || +m.week) : Math.max(+m.week, mustTotal ? mustTotal + 45 : 0);
+
+  // spread T over the days: proportional to free time × weekend share, capped by each day's room
+  const w = days.map(x => x.off ? 0 : x.d === 5 ? +m.sat : x.d === 6 ? +m.sun : 1);
+  const alloc = days.map(() => 0); let rem = T; let active = days.map((x, i) => i).filter(i => w[i] > 0 && days[i].cap > 0);
+  for (let it = 0; it < 8 && rem > 1 && active.length; it++) {
+    const sw = active.reduce((a, i) => a + w[i] * days[i].cap, 0);
+    const sat = active.filter(i => alloc[i] + rem * w[i] * days[i].cap / sw >= days[i].cap);
+    if (!sat.length) { active.forEach(i => { alloc[i] += rem * w[i] * days[i].cap / sw; }); rem = 0; break; }
+    sat.forEach(i => { rem -= days[i].cap - alloc[i]; alloc[i] = days[i].cap; });
+    active = active.filter(i => !sat.includes(i));
+  }
+  const placed = days.map((x, i) => x.chunk(x.gaps, Math.round(alloc[i] / 5) * 5));
+  // rounding and minimum block sizes leave a few minutes out: give them to the days that still have room
+  let deficit = T - placed.flat().reduce((a, c) => a + c.len, 0);
+  for (const i of days.map((x, i) => i).filter(i => w[i] > 0).sort((a, b) => (days[b].cap - alloc[b]) - (days[a].cap - alloc[a]))) {
+    if (deficit < 15) break;
+    const had = placed[i].reduce((a, c) => a + c.len, 0);
+    const more = days[i].chunk(days[i].gaps, had + Math.max(deficit, 20));
+    const got = more.reduce((a, c) => a + c.len, 0) - had;
+    if (got > 0) { placed[i] = more; deficit -= got; }
+  }
+  const unplaced = Math.max(0, Math.round(deficit));
+  const slots = [];
+  days.forEach((x, i) => {
+    x.alloc = placed[i].reduce((a, c) => a + c.len, 0);
+    placed[i].forEach(c => slots.push(Object.assign(c, { d: x.d, date: x.date, startT: x.date.getTime() + c.start * 6e4, endT: x.date.getTime() + c.end * 6e4, campus: !x.we && x.courses.length && c.start >= x.firstC && x.goHome != null && c.start < x.goHome })));
+  });
+
+  // revision budget by subject
+  const revPool = Math.max(0, T - mustTotal);
+  const ws = S.subjects.map(su => examWeight(S, su, addDays(weekStart, 3)));
+  const wsum = ws.reduce((a, b) => a + b, 0) || 1;
+  const rev = {}; S.subjects.forEach((su, i) => { rev[su.id] = revPool * ws[i] / wsum; });
+
+  const labels = REV_LABELS[S.mode] || REV_LABELS.normal;
+  const serieLabel = (su, isCarry) => isCarry ? 'Série en retard' : 'Série d’exercices';
+  const prevCourse = (s) => days[s.d].courses.find(c => c.end <= s.start && c.end >= s.start - 60 && c.type === 'Cours');
+
+  // assignment helper: fills slots in order from the given budgets (must first, then revision)
+  function assignInto(list, mustLeft, carryLeft, revLeft) {
+    const lastByDay = {}; const cnt = {};
+    for (const s of list) {
+      let pick = null, kind = null;
+      const mk = Object.keys(mustLeft).filter(k => mustLeft[k] >= 15 && subjOf(S, k));
+      if (mk.length) {
+        // late séries first, then the subject with the most left; avoid repeating the previous block's subject
+        mk.sort((a, b) => ((carryLeft[b] || 0) > 0) - ((carryLeft[a] || 0) > 0) || (mustLeft[b] - (lastByDay[s.d] === b ? 1e4 : 0)) - (mustLeft[a] - (lastByDay[s.d] === a ? 1e4 : 0)));
+        pick = mk[0]; kind = 'serie';
+      } else {
+        const rk = Object.keys(revLeft).filter(k => revLeft[k] >= 15 && subjOf(S, k));
+        if (rk.length) {
+          const pc = prevCourse(s);
+          if (pc && rk.includes(pc.subj) && S.mode !== 'exam' && lastByDay[s.d] !== pc.subj) pick = pc.subj;
+          else { rk.sort((a, b) => (revLeft[b] - (lastByDay[s.d] === b ? 1e4 : 0)) - (revLeft[a] - (lastByDay[s.d] === a ? 1e4 : 0))); pick = rk[0]; }
+          kind = 'rev';
+        }
+      }
+      if (!pick) { s.kind2 = 'ahead'; continue; }
+      const su = subjOf(S, pick);
+      if (kind === 'serie') {
+        const isCarry = (carryLeft[pick] || 0) > 0;
+        s.title = serieLabel(su, isCarry); s.serie = true; s.late = isCarry;
+        mustLeft[pick] -= s.len; if (isCarry) carryLeft[pick] -= s.len;
+      } else {
+        const pc = prevCourse(s);
+        const k = cnt[pick] = (cnt[pick] || 0) + 1;
+        s.title = pc && pc.subj === pick && S.mode !== 'exam' ? 'Reprendre le cours à chaud' : labels[(k - 1) % labels.length];
+        revLeft[pick] -= s.len;
+      }
+      s.subj = pick; lastByDay[s.d] = pick;
     }
   }
-  if (S.mode !== 'exam') {
-    const used = new Set();
-    for (const s of slots) {
-      if (s.subj || !s.prevC || s.prevC.type !== 'Cours' || used.has(s.prevC.id) || !subjOf(S, s.prevC.subj)) continue;
-      used.add(s.prevC.id); give(s, s.prevC.subj, 'Reprendre le cours à chaud');
+
+  // 1. reference plan for the whole week (what each block "was meant" to be)
+  const base = slots.map(s => Object.assign({}, s));
+  assignInto(base, clone(must), clone(carry), clone(rev));
+
+  // 2. live plan: done work comes off the budgets, unfinished work moves to the blocks still ahead
+  const doneMap = S.done[key] || {};
+  const { by: doneBy } = doneBySubject(S, key);
+  const mustLeft = {}, carryLeft = {}, revLeft = {};
+  for (const su of S.subjects) {
+    const dn = doneBy[su.id] || 0;
+    const mu = must[su.id] || 0;
+    mustLeft[su.id] = Math.max(0, mu - dn);
+    carryLeft[su.id] = Math.max(0, (carry[su.id] || 0) - dn);
+    revLeft[su.id] = Math.max(0, (rev[su.id] || 0) - Math.max(0, dn - mu));
+  }
+  const idOf = (d, s) => d + '-' + s.start + '-study';
+  const future = [], live = [];
+  let lateMin = 0;
+  slots.forEach((s, i) => {
+    const id = idOf(s.d, s), rec = doneMap[id];
+    const b = base[i];
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie }));
+    else if (s.endT <= nowT) {
+      const pre = s.endT <= sinceT;
+      if (!pre) lateMin += s.len;
+      live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed' }));
+    } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
+  });
+  // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were
+  const slotIds = new Set(slots.map(s => idOf(s.d, s)));
+  for (const [id, rec] of Object.entries(doneMap)) {
+    if (slotIds.has(id) || !rec || typeof rec !== 'object' || rec.d == null || rec.a == null) continue;
+    const x = days[rec.d]; if (!x) continue;
+    live.push({ d: rec.d, date: x.date, start: rec.a, end: rec.a + rec.m, len: rec.m, id, title: rec.t, subj: rec.s, state: 'done', catchup: true });
+  }
+  const mustNeeded = Object.values(mustLeft).reduce((a, b) => a + b, 0);
+  const futureCap = future.reduce((a, s) => a + s.len, 0);
+  // 3. not enough room for the séries → bounded catch-up time in the evenings still ahead
+  let extended = 0;
+  if (mustNeeded > futureCap) {
+    let need = mustNeeded - futureCap;
+    for (const x of days) {
+      if (need < 15) break;
+      for (const c of x.chunk(x.extGaps, need)) {
+        const startT = x.date.getTime() + c.start * 6e4, endT = x.date.getTime() + c.end * 6e4;
+        if (endT <= nowT) continue;
+        const f = Object.assign(c, { d: x.d, date: x.date, startT, endT, id: x.d + '-' + c.start + '-study', state: 'todo', catchup: true });
+        future.push(f); live.push(f); need -= c.len; extended += c.len;
+        if (need < 15) break;
+      }
     }
   }
-  const weight = (su, date) => {
-    let b = 1;
-    if (su.exam) {
-      const dd = (fromIso(su.exam) - date) / 864e5;
-      if (dd < 0) b = .05; else if (dd <= 3) b = 4; else if (dd <= 7) b = 2.6; else if (dd <= 14) b = 1.7; else if (dd <= 28) b = 1.2;
-    } else if (S.mode === 'exam') b = .35;
-    return (PRIO_W[su.prio] || 1) * b;
-  };
-  const labels = LABELS[S.mode] || LABELS.normal; const cnt = {};
-  const lastByDay = {};
-  for (const s of slots.slice().sort((a, b) => a.startT - b.startT)) {
-    if (s.subj) { lastByDay[s.d] = s.subj; continue; }
-    const w = subs.map(su => weight(su, s.date)); const sum = w.reduce((a, b) => a + b, 0) || 1;
-    let best = null, bv = -Infinity;
-    subs.forEach((su, i) => {
-      let v = (total + s.len) * w[i] / sum - (assigned[su.id] || 0);
-      if (lastByDay[s.d] === su.id && subs.length > 1) v -= s.len * 0.9;
-      if (v > bv) { bv = v; best = su; }
-    });
-    const k = cnt[best.id] = (cnt[best.id] || 0) + 1;
-    give(s, best.id, labels[(k - 1) % labels.length]);
-    lastByDay[s.d] = best.id;
+  // 4. still not enough → daytime free time left on the remaining days (never on days off or off-weekends)
+  if (mustNeeded > futureCap + extended) {
+    let need = mustNeeded - futureCap - extended;
+    for (const x of days) {
+      if (need < 15) break;
+      if (x.off || w[x.d] === 0) continue;
+      const taken = live.filter(s => s.d === x.d).map(s => ({ s: s.start - (+m.pause), e: s.end + (+m.pause) }));
+      const gaps = [];
+      for (const g of x.gaps) {
+        let parts = [{ s: g.s, e: g.e }];
+        for (const t of taken) parts = parts.flatMap(p => t.e <= p.s || t.s >= p.e ? [p] : [{ s: p.s, e: Math.min(p.e, t.s) }, { s: Math.max(p.s, t.e), e: p.e }].filter(q => q.e - q.s >= 30));
+        gaps.push(...parts);
+      }
+      for (const c of x.chunk(gaps, need)) {
+        const startT = x.date.getTime() + c.start * 6e4, endT = x.date.getTime() + c.end * 6e4;
+        if (endT <= nowT) continue;
+        const f = Object.assign(c, { d: x.d, date: x.date, startT, endT, id: x.d + '-' + c.start + '-study', state: 'todo', catchup: true });
+        future.push(f); live.push(f); need -= c.len; extended += c.len;
+        if (need < 15) break;
+      }
+    }
   }
+  future.sort((a, b) => a.startT - b.startT);
+  assignInto(future, mustLeft, carryLeft, revLeft);
+  const mustLeftAfter = Object.values(mustLeft).reduce((a, b) => a + (b >= 15 ? b : 0), 0);
+
+  for (const s of live) {
+    const x = days[s.d];
+    if (s.kind2 === 'ahead') { x.ev.push({ kind: 'free', start: s.start, end: s.end, title: 'Libre', sub: 'T’es en avance', id: s.id }); continue; }
+    const su = s.subj ? subjOf(S, s.subj) : null;
+    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, late: !!s.late, catchup: !!s.catchup, len: s.len });
+  }
+  // free time and days off
+  for (const x of days) {
+    const FT = { kind: 'free', title: 'Temps libre', sub: 'guitare, potes, série…' };
+    const occupied = () => x.ev.filter(e => e.end > e.start);
+    const fill = (lo, hi, tmpl) => {
+      let t = lo;
+      for (const b of occupied().filter(b => b.end > lo && b.start < hi).sort((a, b) => a.start - b.start)) { if (b.start - t >= 30) x.ev.push(Object.assign({}, tmpl, { start: t, end: b.start })); t = Math.max(t, b.end); }
+      if (hi - t >= 30) x.ev.push(Object.assign({}, tmpl, { start: t, end: hi }));
+    };
+    if (x.off) fill(x.wake + 30, x.wind, { kind: 'free', title: 'Jour off', sub: 'repos, rien à faire' });
+    else {
+      fill(x.eveStart, x.wind, FT);
+      if (x.we && x.alloc > 0) fill(x.wake + 30, x.eveStart, { kind: 'free', title: 'Libre', sub: 'le reste est à toi' });
+      if (x.we && x.alloc === 0) fill(x.wake + 30, x.eveStart, { kind: 'free', title: 'Journée off', sub: 'zéro cours, zéro série' });
+    }
+    x.ev.sort((a, b) => a.start - b.start);
+    x.ev.forEach(e => { if (!e.id) e.id = x.d + '-' + e.start + '-' + e.kind; });
+    x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
+    x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);
+  }
+  days.meta = { T, mustTotal, carry, lateMin, extended, unplaced, mustLeftAfter, sportMin: sportMinutes(S) };
+  return days;
 }
 
 function summarize(S, days, weekKey) {
   const done = S.done[weekKey] || {};
   let plan = 0, dn = 0, course = 0, sport = 0, sportDone = 0; const per = {};
-  for (const day of days) {
-    day.plan = 0; day.dn = 0;
-    for (const e of day.ev) {
-      const L = e.end - e.start;
-      if (e.kind === 'study') { plan += L; day.plan += L; const p = per[e.subj] = per[e.subj] || { plan: 0, done: 0 }; p.plan += L; if (done[e.id]) { dn += L; day.dn += L; p.done += L; } }
-      if (e.kind === 'course') course += L;
-      if (e.kind === 'sport') { sport++; if (done[e.id]) sportDone++; }
-    }
+  for (const day of days) for (const e of day.ev) {
+    const L = e.end - e.start;
+    if (e.kind === 'study') { plan += L; const p = per[e.subj] = per[e.subj] || { plan: 0, done: 0 }; p.plan += L; if (e.state === 'done') { dn += L; p.done += L; } }
+    if (e.kind === 'course') course += L;
+    if (e.kind === 'sport') { sport += L; if (done[e.id]) sportDone += L; }
   }
   let sl = 0; for (let i = 0; i < 7; i++) { const nextWake = i < 6 ? days[i + 1].wake : days[0].wake; sl += nextWake + 1440 - days[i].sleep; }
-  return { plan, dn, course, sport, sportDone, per, sleepAvg: sl / 7, done };
+  return { plan, dn, course, sport, sportDone, per, sleepAvg: sl / 7, done, meta: days.meta };
 }
 
-/* Notifications for the next `horizonDays`, as [{at, title, body, tag}] */
 function buildNotifications(S, now, horizonDays) {
   const N = S.notif || {}; const out = [];
   const nowT = now.getTime(), endT = nowT + (horizonDays || 14) * 864e5;
   let ws = mondayOf(now);
   const push = (at, title, body, tag) => { if (at > nowT + 30e3 && at < endT) out.push({ at, title, body, tag }); };
   while (ws.getTime() < endT) {
-    const days = generate(S, ws);
-    const done = S.done[iso(ws)] || {};
+    const days = generate(S, ws, now);
     for (const day of days) {
-      const base = day.date.getTime(), T = m => base + m * 6e4;
-      const evs = day.ev;
+      const base = day.date.getTime(), T = m => base + m * 6e4, evs = day.ev;
       if (N.morning) {
         const nC = evs.filter(e => e.kind === 'course').length, st = evs.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
         const first = evs.find(e => e.kind === 'course');
         const parts = [];
+        if (day.off) parts.push('jour off, profite');
         if (nC) parts.push(nC + ' cours' + (first ? ', premier à ' + fmt(first.start) : ''));
         if (st) parts.push(hm(st) + ' d’étude');
         if (evs.some(e => e.kind === 'sport')) parts.push('sport');
-        push(T(day.wake), 'Bonjour ! ' + DAYS[day.d] + ' ' + dateLbl(day.date), parts.length ? 'Aujourd’hui : ' + parts.join(', ') + '.' : 'Journée tranquille aujourd’hui.', 'morning');
+        push(T(day.wake), 'Bonjour ! ' + DAYS[day.d] + ' ' + dateLbl(day.date), parts.length ? 'Aujourd’hui : ' + parts.join(', ') + '.' : 'Journée tranquille.', 'morning');
       }
       for (const e of evs) {
-        if (done[e.id]) continue;
+        if (e.state === 'done') continue;
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
-        if (e.kind === 'study' && N.study) push(T(e.start), 'Bloc d’étude · ' + (subjOf(S, e.subj) || {}).name, e.title + ' · ' + hm(e.end - e.start) + (e.deadline ? ' (' + e.dueLbl + ')' : ''), 's' + e.id);
+        if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start), 's' + e.id);
         if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + ' à ' + fmt(e.start), 'Prends tes affaires, ça commence dans 10 min.', 'p' + e.id);
         if (e.kind === 'routine' && N.routine) push(T(e.start), e.title, fmt(e.start) + '–' + fmt(e.end), 'r' + e.id);
         if (e.kind === 'event' && N.event > 0) push(T(e.start - N.event), e.title + ' à ' + fmt(e.start), (e.sub ? e.sub + ' · ' : '') + 'dans ' + N.event + ' min', 'e' + e.id);
       }
-      if (N.evening) {
-        const st = evs.filter(e => e.kind === 'study');
-        if (st.length) push(T(day.sleep - 50), 'Bilan du jour', 'Ouvre l’app et coche les ' + st.length + ' blocs que t’as faits.', 'evening');
-      }
+      if (N.evening && evs.some(e => e.kind === 'study')) push(T(day.sleep - 50), 'Bilan du jour', 'Coche ce que t’as fait : le reste sera replacé dans ta semaine.', 'evening');
     }
     ws = addDays(ws, 7);
-  }
-  if (N.deadline) for (const x of S.deadlines) {
-    if (!x.due) continue; const due = new Date(x.due); const eve = new Date(due); eve.setDate(eve.getDate() - 1); eve.setHours(20, 0, 0, 0);
-    push(eve.getTime(), 'Demain : ' + x.title, 'À rendre ' + DAYS[dow(due)].toLowerCase() + ' à ' + fmt(due.getHours() * 60 + due.getMinutes()) + '.', 'd' + x.id);
   }
   if (N.deadline) for (const su of S.subjects) {
     if (!su.exam) continue; const ex = fromIso(su.exam);
@@ -303,16 +439,14 @@ function buildNotifications(S, now, horizonDays) {
   return out.slice(0, 400);
 }
 
-
-/* Upcoming items for the home-screen widget: [{s,e,t,u,c,k}] in ms */
 function buildAgenda(S, now, nDays) {
   const out = []; const nowT = now.getTime(); const endT = nowT + (nDays || 3) * 864e5;
   let ws = mondayOf(now);
   while (ws.getTime() < endT) {
-    for (const day of generate(S, ws)) {
+    for (const day of generate(S, ws, now)) {
       const base = day.date.getTime();
       for (const e of day.ev) {
-        if (['mark', 'meal', 'move', 'rest'].includes(e.kind)) continue;
+        if (['meal', 'move', 'rest'].includes(e.kind) || e.state === 'done') continue;
         const s = base + e.start * 6e4, en = base + e.end * 6e4;
         if (en <= nowT || s >= endT) continue;
         const su = e.subj ? subjOf(S, e.subj) : null;
@@ -324,6 +458,6 @@ function buildAgenda(S, now, nDays) {
   return out.sort((a, b) => a.s - b.s).slice(0, 40);
 }
 
-const API = { DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, generate, summarize, buildNotifications, buildAgenda };
+const API = { DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

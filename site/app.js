@@ -5,7 +5,7 @@ const L = self.Semaine;
 const { DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, clone, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, subjOf } = L;
 const WORKER = (self.WORKER_URL || '').replace(/\/$/, '');
 const LS = 'ma-semaine-epfl-v2';
-const MODE_COLORS = { chill: '#1C76A6', normal: '#2E7A55', charbon: '#E2510E', exam: '#C8102E', recup: '#6A58B3' };
+const MODE_COLORS = { chill: '#1C76A6', normal: '#2E7A55', charbon: '#E2510E', rattrapage: '#B7791F', exam: '#C8102E', recup: '#6A58B3' };
 const SUBJ_COLORS = ['#C2410C', '#1D4ED8', '#047857', '#7C3AED', '#0E7490', '#BE185D', '#A16207', '#475569'];
 const MINOR = new Set(['meal', 'move', 'rest']);
 
@@ -128,32 +128,41 @@ function editCourse(id) {
   });
 }
 function editRoutine(id) {
-  const r = state.routines.find(x => x.id === id) || { id: null, day: 5, start: 600, end: 660, title: '' };
+  const r = state.routines.find(x => x.id === id) || { id: null, day: 5, start: 600, end: 660, title: '', kind: 'other' };
   openSheet(r.id ? 'Modifier la routine' : 'Nouvelle routine', `<div class="fields">
+    ${F.seg('kind', 'Type', [['sport', 'Sport'], ['other', 'Autre']], r.kind || 'other')}
     ${F.text('title', 'Quoi', r.title, 'full', 'ex. Courses + lessive')}
     ${F.select('day', 'Jour', dayOpts, r.day)}
     ${F.time('start', 'Début', r.start)}${F.time('end', 'Fin', r.end)}
-  </div>${actions(!!r.id)}`, (fd, btn) => {
-    if (isDel(btn)) { state.routines = state.routines.filter(x => x.id !== r.id); return done(); }
+  </div><p class="hint" style="margin-top:10px">Le sport doit faire entre 2h et 3h au total par semaine, quel que soit le mode.</p>${actions(!!r.id)}`, (fd, btn) => {
+    const others = state.routines.filter(x => x.id !== r.id);
+    const sportOf = list => list.filter(x => x.kind === 'sport').reduce((a, x) => a + x.end - x.start, 0);
+    if (isDel(btn)) {
+      if (r.kind === 'sport' && sportOf(others) < L.SPORT_MIN) { toast('Il faut garder au moins 2h de sport par semaine'); return false; }
+      state.routines = others; return done();
+    }
     const t = timesOk(fd); if (!t) return false;
-    const obj = { id: r.id || uid(), day: +fd.day, start: t[0], end: t[1], title: fd.title.trim() || 'Routine' };
+    const obj = { id: r.id || uid(), day: +fd.day, start: t[0], end: t[1], title: fd.title.trim() || (fd.kind === 'sport' ? 'Sport' : 'Routine'), kind: fd.kind === 'sport' ? 'sport' : 'other' };
+    const total = sportOf(others.concat([obj]));
+    if (total < L.SPORT_MIN || total > L.SPORT_MAX) { toast('Sport : ' + hm(total) + ' par semaine. Il faut entre 2h et 3h.'); return false; }
     if (r.id) Object.assign(r, obj); else state.routines.push(obj);
     return done();
   });
 }
 function editSubject(id) {
-  const s = state.subjects.find(x => x.id === id) || { id: null, name: '', color: SUBJ_COLORS[state.subjects.length % SUBJ_COLORS.length], prio: 2, exam: '' };
+  const s = state.subjects.find(x => x.id === id) || { id: null, name: '', color: SUBJ_COLORS[state.subjects.length % SUBJ_COLORS.length], prio: 2, exam: '', serie: 120 };
   openSheet(s.id ? s.name : 'Nouvelle matière', `<div class="fields">
     ${F.text('name', 'Nom', s.name, 'full', 'ex. Analyse I')}
     ${F.colors('color', s.color)}
-    ${F.seg('prio', 'Importance (plus = plus de temps d’étude)', [[1, 'Faible'], [2, 'Normale'], [3, 'Haute']], s.prio)}
+    ${F.select('serie', 'Temps pour finir la série de la semaine', [[0, 'Pas de série'], [60, '1h'], [90, '1h30'], [120, '2h'], [150, '2h30'], [180, '3h'], [240, '4h'], [300, '5h']], s.serie)}
+    ${F.seg('prio', 'Importance pour les révisions', [[1, 'Faible'], [2, 'Normale'], [3, 'Haute']], s.prio)}
     ${F.date('exam', 'Date d’examen (laisse vide si tu ne sais pas)', s.exam)}
   </div>${actions(!!s.id)}`, (fd, btn) => {
     if (isDel(btn)) {
-      if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Confirmer ?'; toast('Ses cours et deadlines seront aussi supprimés'); return false; }
-      state.subjects = state.subjects.filter(x => x.id !== s.id); state.courses = state.courses.filter(c => c.subj !== s.id); state.deadlines = state.deadlines.filter(x => x.subj !== s.id); return done();
+      if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Confirmer ?'; toast('Ses cours seront aussi supprimés'); return false; }
+      state.subjects = state.subjects.filter(x => x.id !== s.id); state.courses = state.courses.filter(c => c.subj !== s.id); return done();
     }
-    const obj = { id: s.id || uid(), name: fd.name.trim() || 'Matière', color: fd.color || s.color, prio: +fd.prio || 2, exam: fd.exam || '' };
+    const obj = { id: s.id || uid(), name: fd.name.trim() || 'Matière', color: fd.color || s.color, prio: +fd.prio || 2, exam: fd.exam || '', serie: +fd.serie || 0 };
     if (s.id) Object.assign(s, obj); else state.subjects.push(obj);
     return done();
   });
@@ -174,21 +183,11 @@ function editEvent(id, date) {
     calSel = obj.date; return done();
   });
 }
-function editDeadline(id, date) {
-  const x = state.deadlines.find(e => e.id === id) || { id: null, subj: (state.subjects[0] || {}).id, title: '', due: (date || iso(addDays(new Date(), 3))) + 'T18:00', hours: 2 };
-  openSheet(x.id ? 'Modifier la deadline' : 'Nouvelle deadline', `<div class="fields">
-    ${F.select('subj', 'Matière', subjOpts(), x.subj)}
-    ${F.text('title', 'Quoi', x.title, 'full', 'ex. Série 9')}
-    ${F.date('dueDate', 'À rendre le', (x.due || '').slice(0, 10), '')}
-    <div class="f"><label for="f-dueTime">à</label><input id="f-dueTime" name="dueTime" type="time" value="${esc((x.due || '').slice(11, 16) || '18:00')}"></div>
-    ${F.seg('hours', 'Temps de travail estimé', [[1, '1h'], [2, '2h'], [3, '3h'], [5, '5h']], [1, 2, 3, 5].includes(+x.hours) ? +x.hours : 2)}
-  </div><p class="hint" style="margin-top:10px">Le planning réserve ce temps dans les jours d’avant, et tu reçois un rappel la veille.</p>${actions(!!x.id)}`, (fd, btn) => {
-    if (isDel(btn)) { state.deadlines = state.deadlines.filter(e => e.id !== x.id); return done(); }
-    if (!fd.dueDate) { toast('Choisis une date'); return false; }
-    const obj = { id: x.id || uid(), subj: fd.subj, title: fd.title.trim() || 'Série', due: fd.dueDate + 'T' + (fd.dueTime || '18:00'), hours: +fd.hours || 2 };
-    if (x.id) Object.assign(x, obj); else state.deadlines.push(obj);
-    calSel = fd.dueDate; return done();
-  });
+function toggleOff(di) {
+  const i = state.offDays.indexOf(di);
+  if (i >= 0) { state.offDays.splice(i, 1); toast('Jour off annulé'); }
+  else { state.offDays.push(di); toast('Jour off : le reste de la semaine s’adapte'); }
+  done();
 }
 function editExam(subjId, date) {
   const opts = subjOpts();
@@ -202,9 +201,10 @@ function editExam(subjId, date) {
   });
 }
 function addSheet() {
-  openSheet('Ajouter', `<div class="modes">
-    <button type="button" class="mopt" data-act="newEvent" style="--m:var(--acc)"><span class="sw8"></span><span><b>Un événement</b><small>Soirée, rendez-vous, match… Le planning travaille autour.</small></span></button>
-    <button type="button" class="mopt" data-act="newDeadline" style="--m:var(--warn)"><span class="sw8"></span><span><b>Une série à rendre</b><small>Le temps nécessaire est réservé dans les jours d’avant.</small></span></button>
+  const isOff = state.offDays.includes(calSel);
+  openSheet('Ajouter le ' + dateLbl(fromIso(calSel)), `<div class="modes">
+    <button type="button" class="mopt" data-act="newEvent" style="--m:var(--acc)"><span class="sw8"></span><span><b>Un événement</b><small>Soirée, rendez-vous, match… Les révisions de ce créneau sont replacées ailleurs dans la semaine.</small></span></button>
+    <button type="button" class="mopt" data-act="offDay" data-v="${calSel}" style="--m:var(--faint)"><span class="sw8"></span><span><b>${isOff ? 'Annuler le jour off' : 'Un jour off'}</b><small>Aucune étude ce jour-là. Le travail est réparti sur les autres jours.</small></span></button>
     <button type="button" class="mopt" data-act="newExam" style="--m:var(--exam)"><span class="sw8"></span><span><b>Un examen</b><small>La matière passe en priorité quand l’examen approche.</small></span></button>
   </div>`);
 }
@@ -214,25 +214,30 @@ function modeSheet() {
 }
 function tuneMode() {
   const m = state.modes[state.mode];
-  openSheet('Mode ' + MODE_META[state.mode].name, `<div class="fields">
-    ${F.time('wake', 'Réveil (semaine)', m.wake)}${F.time('wakeWE', 'Réveil (week-end)', m.wakeWE)}
-    ${F.time('sleep', 'Coucher', m.sleep)}
-    ${F.select('studyDay', 'Étude par jour', [0, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 360, 420, 480].map(v => [v, v ? hm(v) : 'Aucune']), m.studyDay, '')}
-    ${F.select('sat', 'Samedi', [0, 60, 120, 180, 240, 300, 360].map(v => [v, v ? hm(v) + ' d’étude' : 'Jour off']), m.sat, '')}
-    ${F.select('sun', 'Dimanche', [0, 60, 120, 180, 240, 300, 360].map(v => [v, v ? hm(v) + ' d’étude' : 'Jour off']), m.sun, '')}
+  const share = [[0, 'Off'], [0.5, 'Léger'], [1, 'Normal']];
+  const near = v => share.reduce((a, b) => Math.abs(b[0] - v) < Math.abs(a[0] - v) ? b : a)[0];
+  openSheet('Mode ' + MODE_META[state.mode].name, `<p class="hint" style="margin:-4px 0 12px;padding:0">Tu choisis le total de la semaine, l’app le répartit toute seule selon le temps libre de chaque jour. Les séries passent toujours en premier.</p><div class="fields">
+    ${F.select('week', 'Étude par semaine (en plus des cours)', [240, 360, 480, 600, 720, 900, 1080, 1200, 1440, 1680, 1920, 2100, 2400].map(v => [v, hm(v)]), m.week)}
+    ${F.seg('sat', 'Samedi', share, near(m.sat), '')}${F.seg('sun', 'Dimanche', share, near(m.sun), '')}
   </div>
   <details class="more" style="margin-top:14px;border:0"><summary style="padding:8px 2px">Plus de réglages</summary><div class="fields">
     ${F.select('block', 'Durée d’un bloc', [25, 30, 45, 50, 60, 75, 90].map(v => [v, v + ' min']), m.block, '')}
     ${F.select('pause', 'Pause entre blocs', [5, 10, 15, 20].map(v => [v, v + ' min']), m.pause, '')}
-    ${F.select('freeEve', 'Temps libre le soir', [0, 30, 45, 60, 90, 120, 150, 180].map(v => [v, v ? hm(v) : 'Aucun']), m.freeEve, '')}
-    ${F.select('sportMin', 'Durée du sport', [0, 30, 45, 60, 75, 90].map(v => [v, v ? v + ' min' : 'Pas de sport']), m.sportMin, '')}
-    <div class="f full"><label>Jours de sport</label><div class="seg">${DAYS_S.map((n, i) => `<label><input type="checkbox" name="sd${i}"${(m.sportDays || []).includes(i) ? ' checked' : ''}><span>${n}</span></label>`).join('')}</div></div>
+    ${F.select('freeEve', 'Temps libre le soir', [45, 60, 90, 120, 150, 180].map(v => [v, hm(v)]), m.freeEve, '')}
+    ${F.select('ext', 'Rattrapage max par soir', [0, 30, 45, 60, 75, 90].map(v => [v, v ? v + ' min' : 'Jamais']), m.ext, '')}
   </div></details>
   <div class="sh-actions"><button type="submit" class="btn" value="reset">Par défaut</button><button type="submit" class="btn pri" value="save">Enregistrer</button></div>`, (fd, btn) => {
     if (btn && btn.value === 'reset') { state.modes[state.mode] = clone(MODE_DEFAULTS[state.mode]); toast('Mode remis par défaut'); return done(); }
-    for (const k of ['wake', 'wakeWE', 'sleep']) { const v = parseT(fd[k]); if (v != null) m[k] = v; }
-    for (const k of ['studyDay', 'sat', 'sun', 'block', 'pause', 'freeEve', 'sportMin']) if (fd[k] != null) m[k] = +fd[k];
-    m.sportDays = DAYS_S.map((_, i) => i).filter(i => fd['sd' + i]);
+    for (const k of ['week', 'sat', 'sun', 'block', 'pause', 'freeEve', 'ext']) if (fd[k] != null && fd[k] !== '') m[k] = +fd[k];
+    return done();
+  });
+}
+function hoursSheet() {
+  openSheet('Horaires', `<p class="hint" style="margin:-4px 0 12px;padding:0">Les mêmes dans tous les modes.</p><div class="fields">
+    ${F.time('wake', 'Réveil lun–ven', state.wake)}${F.time('sleep', 'Coucher (sauf samedi)', state.sleep)}
+    ${F.time('wakeWE', 'Réveil week-end', state.wakeWE)}${F.time('sleepSat', 'Coucher samedi soir', state.sleepSat % 1440)}
+  </div>${actions(false)}`, fd => {
+    for (const k of ['wake', 'sleep', 'wakeWE', 'sleepSat']) { let v = parseT(fd[k]); if (v == null) continue; if (k.startsWith('sleep') && v < 240) v += 1440; state[k] = v; }
     return done();
   });
 }
@@ -242,16 +247,18 @@ function weekSheet() {
   const pct = sm.plan ? Math.round(sm.dn / sm.plan * 100) : 0;
   const max = Math.max(1, ...Object.values(sm.per).map(x => x.plan));
   const alerts = [];
-  if (sm.sleepAvg < 450) alerts.push('Moins de 7h30 de sommeil par nuit. Avance le coucher dans « Ajuster le mode ».');
-  const short = days.filter(d => d.shortfall >= 30);
-  if (short.length) alerts.push('L’objectif d’étude ne rentre pas en entier ' + short.map(d => DAYS[d.d].toLowerCase()).join(', ') + ' (journées chargées en cours).');
+  const M = days.meta;
+  if (M.mustLeftAfter >= 15) alerts.push(hm(M.mustLeftAfter) + ' de séries ne rentrent plus cette semaine. Elles passeront à la semaine prochaine, ou passe en mode Rattrapage.');
+  if (M.unplaced >= 30) alerts.push('Pas assez de temps libre pour tout : ' + hm(M.unplaced) + ' d’étude ne rentrent pas.');
+  if (M.sportMin < L.SPORT_MIN || M.sportMin > L.SPORT_MAX) alerts.push('Sport : ' + hm(M.sportMin) + ' par semaine. Il en faut entre 2h et 3h (Ma semaine → Routines).');
+  if (sm.sleepAvg < 450) alerts.push('Moins de 7h30 de sommeil par nuit en moyenne.');
   if (state.mode === 'exam' && !state.subjects.some(s => s.exam)) alerts.push('Ajoute tes dates d’examen (Calendrier → +) pour que le mode Exam sache quoi prioriser.');
   if (state.mode === 'exam' && state.coursesOn) alerts.push('Pendant la session, coupe « J’ai cours » dans Ma semaine pour libérer les journées.');
   openSheet('Semaine du ' + dateLbl(ws), `<div class="stats">
       <div class="stat"><div class="k">Étude faite</div><div class="v">${pct}%</div><div class="hint" style="padding:0">${hm(sm.dn)} sur ${hm(sm.plan)}</div></div>
-      <div class="stat"><div class="k">Cours</div><div class="v">${state.coursesOn ? hm(sm.course) : '—'}</div></div>
+      <div class="stat${M.lateMin ? ' warn' : ''}"><div class="k">Pas fait (replacé)</div><div class="v">${hm(M.lateMin)}</div></div>
       <div class="stat${sm.sleepAvg < 450 ? ' warn' : ''}"><div class="k">Sommeil moyen</div><div class="v">${hm(sm.sleepAvg)}</div></div>
-      <div class="stat"><div class="k">Sport</div><div class="v">${sm.sportDone}/${sm.sport}</div></div>
+      <div class="stat"><div class="k">Sport prévu</div><div class="v">${hm(sm.sport)}</div></div>
     </div>
     ${alerts.map(a => `<div class="alert">${esc(a)}</div>`).join('')}
     <div class="sec-t" style="margin-top:20px">Par matière</div>
@@ -277,19 +284,24 @@ function renderToday() {
     return `<button type="button" role="tab" class="sd${di === todayIso() ? ' today' : ''}" aria-selected="${di === selDate}" data-act="pick" data-v="${di}"><span class="l">${DAYS_S[d.d]}</span><span class="n">${d.date.getDate()}</span><span class="p"><i style="width:${d.plan ? d.dn / d.plan * 100 : 0}%"></i></span></button>`;
   }).join('')}</div><button type="button" class="arr" data-act="wk" data-v="7" aria-label="Semaine suivante">›</button>`;
 
-  const main = day.ev.filter(e => e.kind !== 'mark');
+  const main = day.ev;
+  const M = days.meta;
   let hero = '';
-  if (isToday) {
+  if (day.off) hero = `<div class="hero quiet"><div class="k">Jour off</div><div class="t">Repos aujourd’hui</div><div class="s">Le travail de ce jour est réparti sur le reste de la semaine.</div></div>`;
+  else if (isToday) {
     const cur = main.find(e => !MINOR.has(e.kind) && e.start <= mins && mins < e.end) || main.find(e => e.start <= mins && mins < e.end);
     const nxt = main.find(e => e.start > mins && !MINOR.has(e.kind));
     if (cur) {
       const p = Math.round((mins - cur.start) / (cur.end - cur.start) * 100);
       hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}</div><div class="s">${esc(cur.sub || '')}</div><div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}</b></span></div>` : ''}</div>`;
-    } else if (nxt) {
-      hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}</div></div>`;
-    } else hero = `<div class="hero quiet"><div class="k">C’est fini pour aujourd’hui</div><div class="t">Bonne soirée</div><div class="s">Au lit vers ${fmt(day.sleep)}.</div></div>`;
+    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}</div></div>`;
+    else hero = `<div class="hero quiet"><div class="k">C’est fini pour aujourd’hui</div><div class="t">Bonne soirée</div><div class="s">Au lit vers ${fmt(day.sleep)}.</div></div>`;
   }
-  const st = main.filter(e => e.kind === 'study'), stDone = st.filter(e => sm.done[e.id]);
+  let late = '';
+  const thisWeek = iso(mondayOf(new Date())) === key;
+  if (thisWeek && M.mustLeftAfter >= 15) late = `<div class="notice warn"><span><b>${hm(M.mustLeftAfter)} de séries ne rentrent plus</b> cette semaine.${state.mode !== 'rattrapage' ? ' Le mode Rattrapage peut t’aider.' : ' Elles passeront à la semaine prochaine.'}</span>${state.mode !== 'rattrapage' ? '<button type="button" data-act="setMode" data-v="rattrapage">Rattrapage</button>' : ''}</div>`;
+  else if (thisWeek && M.lateMin >= 15) late = `<div class="notice"><span><b>${hm(M.lateMin)} pas faits</b> cette semaine : c’est déjà replacé${M.extended ? ', avec ' + hm(M.extended) + ' de rattrapage' : ''}.</span></div>`;
+  const st = main.filter(e => e.kind === 'study'), stDone = st.filter(e => e.state === 'done');
   const prog = st.length ? `<div class="prog"><span><b>${stDone.length}/${st.length}</b> blocs</span><span class="track"><i style="width:${stDone.length / st.length * 100}%"></i></span><span class="num">${hm(day.dn)} / ${hm(day.plan)}</span></div>` : '';
   const notice = !state.notif.on && isToday ? `<div class="notice"><span>Les rappels sont coupés.</span><button type="button" data-act="goSet">Activer</button></div>` : '';
 
@@ -297,19 +309,21 @@ function renderToday() {
   for (const e of main) {
     if (MINOR.has(e.kind)) { rows.push(`<div class="it k-minor"><span class="tm">${fmt(e.start)}</span><span class="minor">${esc(e.title)}</span></div>`); continue; }
     const su = e.subj ? subjOf(state, e.subj) : null;
-    const isDone = !!sm.done[e.id], can = e.kind === 'study' || e.kind === 'sport';
+    const isDone = e.kind === 'study' ? e.state === 'done' : !!sm.done[e.id];
+    const can = e.kind === 'study' || e.kind === 'sport';
     const cls = ['it', 'k-' + e.kind];
     if (isToday && e.start <= mins && mins < e.end) cls.push('now');
-    if ((isToday && e.end <= mins) || isPastDay) cls.push('past');
+    if (e.state === 'missed') cls.push('missed');
+    else if ((isToday && e.end <= mins) || isPastDay) cls.push('past');
     if (isDone) cls.push('done');
+    const tags = (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"><div class="ti">${esc(e.title)}${e.deadline ? `<span class="tag">${esc(e.dueLbl)}</span>` : ''}</div>${e.sub ? `<div class="su">${esc(e.sub)}</div>` : ''}</div>
+      <div class="card"><div class="bd"><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}</div>` : ''}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
-  $('#todayBody').innerHTML = `${hero}${notice}${prog}<div class="tl">${rows.join('')}</div>
+  $('#todayBody').innerHTML = `${hero}${late}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
-    ${day.shortfall >= 30 ? `<p class="short">Journée chargée : ${hm(day.shortfall)} d’étude ne rentrent pas.</p>` : ''}
-    <button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button>`;
+    <div class="day-actions"><button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button><button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
 }
 
 /* ---------- Calendrier ---------- */
@@ -322,21 +336,21 @@ function renderCal() {
     if (i >= 35 && d.getMonth() !== mo) break;
     const dots = [];
     if (state.events.some(x => x.date === di)) dots.push('<i class="i-ev"></i>');
-    if (state.deadlines.some(x => (x.due || '').slice(0, 10) === di)) dots.push('<i class="i-dl"></i>');
+    if (state.offDays.includes(di)) dots.push('<i class="i-off"></i>');
     if (state.subjects.some(s => s.exam === di)) dots.push('<i class="i-ex"></i>');
     cells.push(`<button type="button" class="cell${d.getMonth() !== mo ? ' out' : ''}${di === todayIso() ? ' today' : ''}" data-act="calday" data-v="${di}" aria-selected="${di === calSel}" aria-label="${longDate(d)}"><span class="n">${d.getDate()}</span><span class="dots">${dots.join('')}</span></button>`);
   }
   const items = [];
   state.subjects.filter(s => s.exam === calSel).forEach(s => items.push(`<button type="button" class="li" data-act="editExam" data-v="${esc(s.id)}" style="--c:var(--exam)"><span class="dt"></span><span class="bd"><span class="ti">Examen · ${esc(s.name)}</span></span>${CHEV}</button>`));
-  state.deadlines.filter(x => (x.due || '').slice(0, 10) === calSel).forEach(x => { const s = subjOf(state, x.subj); items.push(`<button type="button" class="li" data-act="editDeadline" data-v="${esc(x.id)}" style="--c:var(--warn)"><span class="dt"></span><span class="bd"><span class="ti">${esc(x.title)}</span><span class="su">À rendre · ${esc(s ? s.name : '')} · ${x.hours}h de travail</span></span><span class="rt">${esc((x.due || '').slice(11, 16))}</span>${CHEV}</button>`); });
+  if (state.offDays.includes(calSel)) items.push(`<button type="button" class="li" data-act="offDay" data-v="${calSel}" style="--c:var(--faint)"><span class="dt"></span><span class="bd"><span class="ti">Jour off</span><span class="su">Touche pour annuler</span></span></button>`);
   state.events.filter(x => x.date === calSel).sort((a, b) => a.start - b.start).forEach(x => items.push(`<button type="button" class="li" data-act="editEvent" data-v="${esc(x.id)}" style="--c:var(--acc)"><span class="dt"></span><span class="bd"><span class="ti">${esc(x.title)}</span>${x.place ? `<span class="su">${esc(x.place)}</span>` : ''}</span><span class="rt">${fmt(x.start)}<br>${fmt(x.end)}</span>${CHEV}</button>`));
   const sel = fromIso(calSel);
   $('#calBody').innerHTML = `
     <div class="cal-h"><button type="button" data-act="calm" data-v="-1" aria-label="Mois précédent">‹</button><b>${MONTHS_L[mo]} ${y}</b><button type="button" data-act="calm" data-v="1" aria-label="Mois suivant">›</button></div>
     <div class="cal">${DAYS_S.map(n => `<span class="wd">${n}</span>`).join('')}${cells.join('')}</div>
-    <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-dl"></i>À rendre</span><span><i class="i-ex"></i>Examen</span></div>
+    <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Jour off</span><span><i class="i-ex"></i>Examen</span></div>
     <div class="sec-t">${longDate(sel)}<button type="button" data-act="openDay">Voir la journée</button></div>
-    <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour ajouter un événement, une série ou un examen.</div>'}</div>`;
+    <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour un événement, un jour off ou un examen.</div>'}</div>`;
 }
 
 /* ---------- Ma semaine type ---------- */
@@ -349,9 +363,10 @@ function renderWeek() {
     <div class="sec-t">Horaire<button type="button" data-act="editCourse">+ Cours</button></div>
     <div class="group">${courseRows || '<div class="empty">Aucun cours.</div>'}</div>
     <div class="sec-t">Matières<button type="button" data-act="editSubject">+ Matière</button></div>
-    <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
+    <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${s.serie ? 'Série ' + hm(s.serie) + '/sem.' : 'Pas de série'} · ${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
     <div class="sec-t">Routines<button type="button" data-act="editRoutine">+ Routine</button></div>
-    <div class="group">${state.routines.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(r => `<button type="button" class="li" data-act="editRoutine" data-v="${r.id}"><span class="dt"></span><span class="bd"><span class="ti">${esc(r.title)}</span><span class="su">${DAYS[r.day]}</span></span><span class="rt">${fmt(r.start)}<br>${fmt(r.end)}</span>${CHEV}</button>`).join('') || '<div class="empty">Aucune routine.</div>'}</div>`;
+    ${(() => { const sp = L.sportMinutes(state); const ok = sp >= L.SPORT_MIN && sp <= L.SPORT_MAX; return `<p class="hint" style="margin:0 4px 8px;${ok ? '' : 'color:var(--warn);font-weight:650'}">Sport : ${hm(sp)} par semaine ${ok ? '(entre 2h et 3h, parfait)' : '· il faut entre 2h et 3h'}</p>`; })()}
+    <div class="group">${state.routines.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(r => `<button type="button" class="li" data-act="editRoutine" data-v="${r.id}" style="--c:${r.kind === 'sport' ? 'var(--ink)' : 'var(--faint)'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(r.title)}</span><span class="su">${DAYS[r.day]}${r.kind === 'sport' ? ' · sport' : ''}</span></span><span class="rt">${fmt(r.start)}<br>${fmt(r.end)}</span>${CHEV}</button>`).join('') || '<div class="empty">Aucune routine.</div>'}</div>`;
 }
 
 /* ---------- Réglages ---------- */
@@ -363,7 +378,7 @@ function renderSet() {
   if (isIOS && !standalone()) status = `<div class="status"><b>Installe d’abord l’app</b>Pour recevoir des rappels :<ol><li>Ouvre cette page dans <b style="display:inline">Safari</b></li><li>Touche Partager, puis « Sur l’écran d’accueil »</li><li>Ouvre l’app depuis l’icône et reviens ici</li></ol></div>`;
   else if (perm === 'denied') status = `<div class="status"><b>Rappels bloqués</b>Réactive-les dans Réglages iPhone → Notifications → EPFL Calendar.</div>`;
   else if (N.on) status = `<div class="status"><b>Rappels activés</b>${sync ? sync.n + ' rappels prévus sur les 14 prochains jours.' : 'Mise à jour en cours…'}</div><div class="btns"><button type="button" class="btn" data-act="testNotif">Tester</button><button type="button" class="btn" data-act="notifOff">Couper</button></div>`;
-  else status = `<div class="status"><b>Rappels coupés</b>Reçois un rappel avant tes cours, au début de tes blocs d’étude et la veille de tes deadlines.</div><div class="btns"><button type="button" class="btn pri full" data-act="notifOn">Activer les rappels</button></div>`;
+  else status = `<div class="status"><b>Rappels coupés</b>Reçois un rappel avant tes cours, au début de tes blocs d’étude et avant tes examens.</div><div class="btns"><button type="button" class="btn pri full" data-act="notifOn">Activer les rappels</button></div>`;
   const T = (f, label, sub) => `<label class="row-sw"><span class="bd"><span class="ti">${label}</span>${sub ? `<span class="su">${sub}</span>` : ''}</span><input type="checkbox" class="sw" data-nf="${f}" ${N[f] ? 'checked' : ''}></label>`;
   $('#setBody').innerHTML = `
     <div class="sec-t">Rappels</div>
@@ -372,13 +387,15 @@ function renderSet() {
         <label class="row-sw"><span class="bd"><span class="ti">Avant un cours</span></span><select data-nfn="course" style="border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--bg)">${[0, 5, 10, 15, 30].map(v => `<option value="${v}"${N.course === v ? ' selected' : ''}>${v ? v + ' min avant' : 'Non'}</option>`).join('')}</select></label>
         ${T('study', 'Blocs d’étude', 'Au début de chaque bloc')}
         ${T('morning', 'Matin et soir', 'Programme du jour au réveil, bilan avant de dormir')}
-        ${T('deadline', 'Deadlines et examens', 'La veille, et une semaine avant un examen')}
+        ${T('deadline', 'Examens', 'Une semaine avant et la veille')}
         ${T('sport', 'Sport, routines et événements', 'Juste avant')}
       </details>` : ''}
     </div>
+    <div class="sec-t">Horaires</div>
+    <div class="group"><button type="button" class="li" data-act="hoursSheet"><span class="bd"><span class="ti">Réveil ${fmt(state.wake)} · coucher ${fmt(state.sleep)}</span><span class="su">Du lundi au vendredi, dans tous les modes</span></span>${CHEV}</button></div>
     <div class="sec-t">Mode</div>
     <div class="group"><button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[state.mode]}"><span class="dt"></span><span class="bd"><span class="ti">${MODE_META[state.mode].name}</span><span class="su">Changer de mode</span></span>${CHEV}</button>
-      <button type="button" class="li" data-act="tuneMode"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[state.mode].name}</span><span class="su">Réveil, coucher, heures d’étude, sport</span></span>${CHEV}</button></div>
+      <button type="button" class="li" data-act="tuneMode"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[state.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>
     <div class="sec-t">Widget</div>
     <div class="group"><button type="button" class="li" data-act="widgetSheet"><span class="bd"><span class="ti">Widget pour l’écran d’accueil</span><span class="su">Ton programme sans ouvrir l’app</span></span>${CHEV}</button></div>
     <div class="sec-t">Sauvegarde</div>
@@ -461,7 +478,20 @@ document.addEventListener('click', async e => {
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
     case 'wk': selDate = iso(addDays(fromIso(selDate), +v)); renderToday(); return;
-    case 'done': { const d = state.done[b.dataset.w] = state.done[b.dataset.w] || {}; if (d[v]) delete d[v]; else d[v] = 1; save(); keepScroll(renderToday); return; }
+    case 'done': {
+      const wk = b.dataset.w, d = state.done[wk] = state.done[wk] || {};
+      if (d[v]) delete d[v];
+      else {
+        const days = L.generate(state, fromIso(wk)); let ev = null;
+        for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
+        if (!ev) return;
+        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie } : { k: ev.kind, m: ev.end - ev.start };
+        b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
+      }
+      save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;
+    }
+    case 'offDay': toggleOff(v); closeSheet(); return;
+    case 'hoursSheet': hoursSheet(); return;
     case 'modeSheet': modeSheet(); return;
     case 'setMode': state.mode = v; save(); renderAll(); closeSheet(); toast('Mode ' + MODE_META[v].name); return;
     case 'tuneMode': tuneMode(); return;
@@ -472,10 +502,8 @@ document.addEventListener('click', async e => {
     case 'openDay': selDate = calSel; showTab('today'); return;
     case 'addSheet': addSheet(); return;
     case 'newEvent': editEvent(null, calSel); return;
-    case 'newDeadline': editDeadline(null, calSel); return;
     case 'newExam': editExam(null, calSel); return;
     case 'editEvent': editEvent(v); return;
-    case 'editDeadline': editDeadline(v); return;
     case 'editExam': editExam(v); return;
     case 'editCourse': editCourse(v); return;
     case 'editRoutine': editRoutine(v); return;
@@ -495,6 +523,18 @@ document.addEventListener('change', e => {
   if (t.dataset.nf) { if (t.dataset.nf === 'sport') { state.notif.sport = state.notif.routine = t.checked; state.notif.event = t.checked ? 15 : 0; } else if (t.dataset.nf === 'morning') { state.notif.morning = state.notif.evening = t.checked; } else state.notif[t.dataset.nf] = t.checked; save(); return; }
   if (t.dataset.nfn) { state.notif[t.dataset.nfn] = +t.value; save(); }
 });
+
+
+/* ---------- bubble touch effect ---------- */
+const BUB_SEL = '.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
+document.addEventListener('pointerdown', e => {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const el = e.target.closest(BUB_SEL); if (!el) return;
+  const r = el.getBoundingClientRect(), size = Math.max(r.width, r.height) * 2.2;
+  const b = document.createElement('span'); b.className = 'bub';
+  b.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - r.left}px;top:${e.clientY - r.top}px`;
+  el.appendChild(b); setTimeout(() => b.remove(), 650);
+}, { passive: true });
 
 /* ---------- boot ---------- */
 renderAll();

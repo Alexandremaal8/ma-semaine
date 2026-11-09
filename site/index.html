@@ -60,7 +60,7 @@ button{cursor:pointer;background:none;border:0;padding:0}
 .top{padding:calc(14px + var(--st)) 0 6px}
 .eyebrow{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.01em}
 .top-row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
-h1.big{font-family:var(--f-display);font-stretch:75%;font-weight:850;font-size:clamp(30px,8.6vw,40px);line-height:1;margin:2px 0 0;letter-spacing:-.01em}
+h1.big{font-family:var(--f-display);font-stretch:75%;font-weight:850;font-size:clamp(26px,7.4vw,40px);line-height:1;white-space:nowrap;margin:2px 0 0;letter-spacing:-.01em}
 .mode-pill{display:flex;align-items:center;gap:7px;padding:9px 12px 9px 11px;border-radius:999px;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:15px;white-space:nowrap;flex:none}
 .mode-pill svg{width:14px;height:14px}
 .mode-pill .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.85}
@@ -250,6 +250,38 @@ details.more summary::-webkit-details-marker{display:none}
 textarea.box{width:100%;min-height:110px;font-family:var(--f-mono);font-size:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;color:var(--ink)}
 .toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + var(--sb) + 16px);transform:translateX(-50%) translateY(16px);background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:14.5px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:40;max-width:calc(100% - 32px);text-align:center}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* States added in v3 */
+.notice.warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--line));background:var(--warn-bg)}
+.tag.cu{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--acc)}
+.it.missed .card{border-style:dashed;background:transparent}
+.it.missed .ti{color:var(--muted)}
+.day-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+.day-actions .linkbtn{margin:0}
+.i-off{background:var(--faint)}
+body[data-mode="rattrapage"]{--accent:#B7791F}
+
+/* Bubble buttons: springy press, glossy primaries, a soft bubble where you touch */
+.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.sh-h button,.seg span,.swatches span,.strip .arr,.sec-t button{transition:transform .38s cubic-bezier(.3,1.9,.5,1),box-shadow .2s,background-color .2s;position:relative;overflow:hidden;-webkit-user-select:none;user-select:none}
+.btn:active,.linkbtn:active,.mopt:active,.mode-pill:active,.fab:active,.sd:active,.cell:active,.chk:active,.cal-h button:active,.sh-h button:active,.notice button:active,.strip .arr:active,.sec-t button:active{transform:scale(.9);transition-duration:.12s}
+.li:active{transform:scale(.97);transition-duration:.12s}
+.nav button:active svg{transform:scale(.8)}
+.nav svg{transition:transform .38s cubic-bezier(.3,1.9,.5,1)}
+.nav button[aria-current="page"] svg{transform:translateY(-1px) scale(1.08)}
+.btn,.linkbtn{border-radius:999px}
+.btn.pri,.mode-pill,.fab{background-image:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,0) 55%);box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 38%,transparent),inset 0 1px 0 rgba(255,255,255,.4),inset 0 -2px 0 rgba(0,0,0,.08)}
+.linkbtn,.btn:not(.pri){box-shadow:0 2px 8px rgba(20,10,30,.06),inset 0 1px 0 rgba(255,255,255,.6)}
+.chk[aria-pressed="true"]{background-image:linear-gradient(180deg,rgba(255,255,255,.3),rgba(255,255,255,0) 60%);box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 40%,transparent)}
+.bub{position:absolute;border-radius:50%;pointer-events:none;background:currentColor;opacity:.22;transform:translate(-50%,-50%) scale(0);animation:bub .6s cubic-bezier(.2,.8,.3,1) forwards}
+@keyframes bub{to{transform:translate(-50%,-50%) scale(1);opacity:0}}
+.chk.pop{animation:pop .42s cubic-bezier(.3,1.9,.5,1)}
+.chk.pop::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--acc);animation:ring .42s ease-out forwards}
+@keyframes pop{0%{transform:scale(.7)}55%{transform:scale(1.25)}100%{transform:scale(1)}}
+@keyframes ring{from{transform:scale(.6);opacity:.9}to{transform:scale(1.6);opacity:0}}
+.chk{overflow:visible}
+.sheet-bg.on .sheet{animation:sheetIn .45s cubic-bezier(.3,1.4,.5,1)}
+@keyframes sheetIn{from{transform:translateY(60px)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){.bub,.chk.pop,.chk.pop::after,.sheet-bg.on .sheet{animation:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -267,7 +299,7 @@ textarea.box{width:100%;min-height:110px;font-family:var(--f-mono);font-size:12p
 </section>
 
 <section class="view" id="v-cal">
-  <header class="p-head"><div class="wrap"><h1 class="big">Calendrier</h1><p>Événements, séries à rendre et examens.</p></div></header>
+  <header class="p-head"><div class="wrap"><h1 class="big">Calendrier</h1><p>Événements, jours off et examens.</p></div></header>
   <div class="wrap" id="calBody"></div>
   <button type="button" class="fab" data-act="addSheet" aria-label="Ajouter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
 </section>
