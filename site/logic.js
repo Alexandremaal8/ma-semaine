@@ -303,6 +303,27 @@ function buildNotifications(S, now, horizonDays) {
   return out.slice(0, 400);
 }
 
-const API = { DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, generate, summarize, buildNotifications };
+
+/* Upcoming items for the home-screen widget: [{s,e,t,u,c,k}] in ms */
+function buildAgenda(S, now, nDays) {
+  const out = []; const nowT = now.getTime(); const endT = nowT + (nDays || 3) * 864e5;
+  let ws = mondayOf(now);
+  while (ws.getTime() < endT) {
+    for (const day of generate(S, ws)) {
+      const base = day.date.getTime();
+      for (const e of day.ev) {
+        if (['mark', 'meal', 'move', 'rest'].includes(e.kind)) continue;
+        const s = base + e.start * 6e4, en = base + e.end * 6e4;
+        if (en <= nowT || s >= endT) continue;
+        const su = e.subj ? subjOf(S, e.subj) : null;
+        out.push({ s, e: en, t: e.title, u: e.sub || '', c: su ? su.color : (e.kind === 'event' ? '#E2510E' : '#9C99A3'), k: e.kind });
+      }
+    }
+    ws = addDays(ws, 7);
+  }
+  return out.sort((a, b) => a.s - b.s).slice(0, 40);
+}
+
+const API = { DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

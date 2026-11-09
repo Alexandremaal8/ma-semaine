@@ -71,11 +71,24 @@ async function handle(req, env) {
   const url = new URL(req.url);
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (url.pathname === '/vapid') return json({ publicKey: (await getVapid(env)).pub });
+  if (url.pathname === '/agenda' && req.method === 'GET') {
+    const t = url.searchParams.get('t') || '';
+    if (!/^[a-f0-9]{24,64}$/.test(t)) return json({ error: 'bad token' }, 400);
+    const a = await env.KV.get('agenda:' + t, 'json');
+    return json(a || { agenda: [] });
+  }
   if (url.pathname === '/health') return json({ ok: true, subs: (await index(env)).length });
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const text = await req.text();
   if (text.length > 200000) return json({ error: 'too large' }, 413);
   let data; try { data = JSON.parse(text); } catch { return json({ error: 'bad json' }, 400); }
+  if (url.pathname === '/agenda') {
+    const t = String(data.token || '');
+    if (!/^[a-f0-9]{24,64}$/.test(t)) return json({ error: 'bad token' }, 400);
+    const agenda = (Array.isArray(data.agenda) ? data.agenda : []).slice(0, 60).map(x => ({ s: +x.s, e: +x.e, t: String(x.t || '').slice(0, 80), u: String(x.u || '').slice(0, 80), c: String(x.c || '').slice(0, 9), k: String(x.k || '').slice(0, 10) }));
+    await env.KV.put('agenda:' + t, JSON.stringify({ mode: String(data.mode || '').slice(0, 20), agenda, at: Date.now() }), { expirationTtl: 60 * 60 * 24 * 30 });
+    return json({ ok: true });
+  }
   if (!validSub(data.subscription)) return json({ error: 'bad subscription' }, 400);
   const id = await sha(data.subscription.endpoint);
 
