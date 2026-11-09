@@ -58,11 +58,11 @@ function defaultState() {
     v: 3, mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
-      { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180 },
-      { id: 'alg', name: 'Algèbre linéaire', color: '#1D4ED8', prio: 3, exam: '', serie: 180 },
-      { id: 'phy', name: 'Physique (mécanique)', color: '#047857', prio: 2, exam: '', serie: 150 },
-      { id: 'aicc', name: 'AICC I', color: '#7C3AED', prio: 2, exam: '', serie: 150 },
-      { id: 'prog', name: 'Programmation', color: '#0E7490', prio: 2, exam: '', serie: 120 }
+      { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
+      { id: 'alg', name: 'Algèbre linéaire', color: '#1D4ED8', prio: 3, exam: '', serie: 180, corr: 30 },
+      { id: 'phy', name: 'Physique (mécanique)', color: '#047857', prio: 2, exam: '', serie: 150, corr: 30 },
+      { id: 'aicc', name: 'AICC I', color: '#7C3AED', prio: 2, exam: '', serie: 150, corr: 30 },
+      { id: 'prog', name: 'Programmation', color: '#0E7490', prio: 2, exam: '', serie: 120, corr: 30 }
     ],
     courses: [
       C(0, 615, 720, 'ana', 'Cours', 'CM 1 2 / CO 3'), C(0, 975, 1140, 'phy', 'Cours', 'CE 1 6'),
@@ -105,7 +105,7 @@ function normalize(s) {
   out.notif = Object.assign({}, d.notif, out.notif || {});
   out.done = out.done || {};
   ['subjects', 'courses', 'routines', 'events', 'offDays'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
-  out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; });
+  out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
   out.v = 3;
   return out;
 }
@@ -189,7 +189,7 @@ function carryOver(S, weekStart) {
   const prevKey = iso(addDays(weekStart, -7));
   if (!S.done[prevKey] || !S.coursesOn) return {};
   const done = doneBySubject(S, prevKey).by, out = {};
-  for (const su of S.subjects) { const left = (su.serie || 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
+  for (const su of S.subjects) { const left = (su.serie || 0) + (su.serie ? (su.corr || 0) : 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
   return out;
 }
 
@@ -203,9 +203,15 @@ function generate(S, weekStart, now) {
 
   // must = this week's séries + unfinished séries from last week; revision fills the rest of the target
   const carry = carryOver(S, weekStart);
-  const must = {}; let mustTotal = 0;
-  for (const su of S.subjects) { const v = (S.coursesOn ? (+su.serie || 0) : 0) + (carry[su.id] || 0); if (v > 0) { must[su.id] = v; mustTotal += v; } }
-  const T = S.mode === 'recup' ? Math.min(+m.week, mustTotal || +m.week) : Math.max(+m.week, mustTotal ? mustTotal + 45 : 0);
+  // must = séries + checking them against the correction, plus anything unfinished from last week
+  const must = {}, corr = {}; let mustTotal = 0;
+  for (const su of S.subjects) {
+    const c = S.coursesOn && su.serie ? (+su.corr || 0) : 0;
+    const v = (S.coursesOn ? (+su.serie || 0) : 0) + c + (carry[su.id] || 0);
+    corr[su.id] = c;
+    if (v > 0) { must[su.id] = v; mustTotal += v; }
+  }
+  const T = S.mode === 'recup' ? Math.min(+m.week, mustTotal || +m.week) : Math.max(+m.week, mustTotal ? Math.ceil((mustTotal * 1.1 + 30) / 15) * 15 : 0);
 
   // spread T over the days: proportional to free time × weekend share, capped by each day's room
   const w = days.map(x => x.off ? 0 : x.d === 5 ? +m.sat : x.d === 6 ? +m.sun : 1);
@@ -245,12 +251,20 @@ function generate(S, weekStart, now) {
   const prevCourse = (s) => days[s.d].courses.find(c => c.end <= s.start && c.end >= s.start - 60 && c.type === 'Cours');
 
   // assignment helper: fills slots in order from the given budgets (must first, then revision)
-  function assignInto(list, mustLeft, carryLeft, revLeft) {
+  function assignInto(list, mustLeft, carryLeft, revLeft, corrLeft) {
     const lastByDay = {}; const cnt = {};
     for (const s of list) {
       let pick = null, kind = null;
+      // a subject's correction check only comes once its série is fully placed
+      const serieLeft = k => mustLeft[k] - (corrLeft[k] || 0);
       const mk = Object.keys(mustLeft).filter(k => mustLeft[k] >= 15 && subjOf(S, k));
-      if (mk.length) {
+      const ck = mk.filter(k => serieLeft(k) < 15 && (corrLeft[k] || 0) >= 15);
+      const sk = mk.filter(k => serieLeft(k) >= 15);
+      if (ck.length) {
+        ck.sort((a, b) => (lastByDay[s.d] === a) - (lastByDay[s.d] === b));
+        pick = ck[0]; kind = 'corr';
+      } else if (sk.length) {
+        mk.length = 0; mk.push(...sk);
         // late séries first, then the subject with the most left; avoid repeating the previous block's subject
         mk.sort((a, b) => ((carryLeft[b] || 0) > 0) - ((carryLeft[a] || 0) > 0) || (mustLeft[b] - (lastByDay[s.d] === b ? 1e4 : 0)) - (mustLeft[a] - (lastByDay[s.d] === a ? 1e4 : 0)));
         pick = mk[0]; kind = 'serie';
@@ -265,7 +279,14 @@ function generate(S, weekStart, now) {
       }
       if (!pick) { s.kind2 = 'ahead'; continue; }
       const su = subjOf(S, pick);
-      if (kind === 'serie') {
+      if (kind === 'corr') {
+        const need = Math.max(20, Math.min(s.len, corrLeft[pick]));
+        if (need < s.len) { s.end = s.start + need; s.endT = s.startT + need * 6e4; s.len = need; }
+        s.title = 'Vérifier la série avec la correction'; s.serie = true; s.corr = true;
+        mustLeft[pick] -= s.len; corrLeft[pick] -= s.len;
+      } else if (kind === 'serie') {
+        const sl = mustLeft[pick] - (corrLeft[pick] || 0);
+        if (sl + 20 <= s.len) { const need = Math.max(20, sl); s.end = s.start + need; s.endT = s.startT + need * 6e4; s.len = need; }
         const isCarry = (carryLeft[pick] || 0) > 0;
         s.title = serieLabel(su, isCarry); s.serie = true; s.late = isCarry;
         mustLeft[pick] -= s.len; if (isCarry) carryLeft[pick] -= s.len;
@@ -281,16 +302,17 @@ function generate(S, weekStart, now) {
 
   // 1. reference plan for the whole week (what each block "was meant" to be)
   const base = slots.map(s => Object.assign({}, s));
-  assignInto(base, clone(must), clone(carry), clone(rev));
+  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr));
 
   // 2. live plan: done work comes off the budgets, unfinished work moves to the blocks still ahead
   const doneMap = S.done[key] || {};
   const { by: doneBy } = doneBySubject(S, key);
-  const mustLeft = {}, carryLeft = {}, revLeft = {};
+  const mustLeft = {}, carryLeft = {}, revLeft = {}, corrLeft = {};
   for (const su of S.subjects) {
     const dn = doneBy[su.id] || 0;
     const mu = must[su.id] || 0;
     mustLeft[su.id] = Math.max(0, mu - dn);
+    corrLeft[su.id] = Math.min(corr[su.id] || 0, mustLeft[su.id]);
     carryLeft[su.id] = Math.max(0, (carry[su.id] || 0) - dn);
     revLeft[su.id] = Math.max(0, (rev[su.id] || 0) - Math.max(0, dn - mu));
   }
@@ -354,8 +376,8 @@ function generate(S, weekStart, now) {
     }
   }
   future.sort((a, b) => a.startT - b.startT);
-  assignInto(future, mustLeft, carryLeft, revLeft);
-  const mustLeftAfter = Object.values(mustLeft).reduce((a, b) => a + (b >= 15 ? b : 0), 0);
+  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft);
+  const mustLeftAfter = Object.values(mustLeft).reduce((a, b) => a + (b >= 25 ? b : 0), 0);
 
   for (const s of live) {
     const x = days[s.d];

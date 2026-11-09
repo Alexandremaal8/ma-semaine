@@ -150,11 +150,12 @@ function editRoutine(id) {
   });
 }
 function editSubject(id) {
-  const s = state.subjects.find(x => x.id === id) || { id: null, name: '', color: SUBJ_COLORS[state.subjects.length % SUBJ_COLORS.length], prio: 2, exam: '', serie: 120 };
+  const s = state.subjects.find(x => x.id === id) || { id: null, name: '', color: SUBJ_COLORS[state.subjects.length % SUBJ_COLORS.length], prio: 2, exam: '', serie: 120, corr: 30 };
   openSheet(s.id ? s.name : 'Nouvelle matière', `<div class="fields">
     ${F.text('name', 'Nom', s.name, 'full', 'ex. Analyse I')}
     ${F.colors('color', s.color)}
     ${F.select('serie', 'Temps pour finir la série de la semaine', [[0, 'Pas de série'], [60, '1h'], [90, '1h30'], [120, '2h'], [150, '2h30'], [180, '3h'], [240, '4h'], [300, '5h']], s.serie)}
+    ${F.select('corr', 'Vérifier la série avec la correction', [[0, 'Non'], [15, '15 min'], [20, '20 min'], [30, '30 min'], [45, '45 min'], [60, '1h']], s.corr == null ? 30 : s.corr)}
     ${F.seg('prio', 'Importance pour les révisions', [[1, 'Faible'], [2, 'Normale'], [3, 'Haute']], s.prio)}
     ${F.date('exam', 'Date d’examen (laisse vide si tu ne sais pas)', s.exam)}
   </div>${actions(!!s.id)}`, (fd, btn) => {
@@ -162,7 +163,7 @@ function editSubject(id) {
       if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Confirmer ?'; toast('Ses cours seront aussi supprimés'); return false; }
       state.subjects = state.subjects.filter(x => x.id !== s.id); state.courses = state.courses.filter(c => c.subj !== s.id); return done();
     }
-    const obj = { id: s.id || uid(), name: fd.name.trim() || 'Matière', color: fd.color || s.color, prio: +fd.prio || 2, exam: fd.exam || '', serie: +fd.serie || 0 };
+    const obj = { id: s.id || uid(), name: fd.name.trim() || 'Matière', color: fd.color || s.color, prio: +fd.prio || 2, exam: fd.exam || '', serie: +fd.serie || 0, corr: +fd.corr || 0 };
     if (s.id) Object.assign(s, obj); else state.subjects.push(obj);
     return done();
   });
@@ -363,7 +364,7 @@ function renderWeek() {
     <div class="sec-t">Horaire<button type="button" data-act="editCourse">+ Cours</button></div>
     <div class="group">${courseRows || '<div class="empty">Aucun cours.</div>'}</div>
     <div class="sec-t">Matières<button type="button" data-act="editSubject">+ Matière</button></div>
-    <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${s.serie ? 'Série ' + hm(s.serie) + '/sem.' : 'Pas de série'} · ${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
+    <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${s.serie ? 'Série ' + hm(s.serie) + (s.corr ? ' + correction ' + hm(s.corr) : '') : 'Pas de série'} · ${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
     <div class="sec-t">Routines<button type="button" data-act="editRoutine">+ Routine</button></div>
     ${(() => { const sp = L.sportMinutes(state); const ok = sp >= L.SPORT_MIN && sp <= L.SPORT_MAX; return `<p class="hint" style="margin:0 4px 8px;${ok ? '' : 'color:var(--warn);font-weight:650'}">Sport : ${hm(sp)} par semaine ${ok ? '(entre 2h et 3h, parfait)' : '· il faut entre 2h et 3h'}</p>`; })()}
     <div class="group">${state.routines.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(r => `<button type="button" class="li" data-act="editRoutine" data-v="${r.id}" style="--c:${r.kind === 'sport' ? 'var(--ink)' : 'var(--faint)'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(r.title)}</span><span class="su">${DAYS[r.day]}${r.kind === 'sport' ? ' · sport' : ''}</span></span><span class="rt">${fmt(r.start)}<br>${fmt(r.end)}</span>${CHEV}</button>`).join('') || '<div class="empty">Aucune routine.</div>'}</div>`;
