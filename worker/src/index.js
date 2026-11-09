@@ -64,6 +64,7 @@ async function sendPush(env, sub, msg) {
 }
 
 /* ---------- storage ---------- */
+const KEY_RE = /^[a-f0-9]{32,64}$/;
 const validSub = s => s && typeof s.endpoint === 'string' && /^https:\/\//.test(s.endpoint) && s.keys && typeof s.keys.p256dh === 'string' && typeof s.keys.auth === 'string';
 async function index(env) { return (await env.KV.get('subs', 'json')) || []; }
 
@@ -77,6 +78,11 @@ async function handle(req, env) {
     const a = await env.KV.get('agenda:' + t, 'json');
     return json(a || { agenda: [] });
   }
+  if (url.pathname === '/store' && req.method === 'GET') {
+    const k = url.searchParams.get('k') || '';
+    if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
+    return json((await env.KV.get('store:' + k, 'json')) || { updated: 0, state: null });
+  }
   if (url.pathname === '/health') return json({ ok: true, subs: (await index(env)).length });
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const text = await req.text();
@@ -89,6 +95,27 @@ async function handle(req, env) {
     await env.KV.put('agenda:' + t, JSON.stringify({ mode: String(data.mode || '').slice(0, 20), agenda, at: Date.now() }), { expirationTtl: 60 * 60 * 24 * 30 });
     return json({ ok: true });
   }
+  /* synced state between your devices, keyed by a secret code; newest wins */
+  if (url.pathname === '/store') {
+    const k = String(data.k || '');
+    if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
+    if (!data.state || typeof data.state !== 'object' || !Number.isFinite(data.updated)) return json({ error: 'bad state' }, 400);
+    const cur = await env.KV.get('store:' + k, 'json');
+    if (cur && cur.updated > data.updated) return json({ ok: false, newer: true, updated: cur.updated, state: cur.state });
+    await env.KV.put('store:' + k, JSON.stringify({ updated: data.updated, state: data.state }));
+    return json({ ok: true, updated: data.updated });
+  }
+  /* a device without notifications (your PC) refreshes the reminders of the devices that have them */
+  if (url.pathname === '/notifs') {
+    const k = String(data.k || '');
+    if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
+    const list = Array.isArray(data.notifications) ? data.notifications : [];
+    const notifications = list.slice(0, 500).filter(n => n && Number.isFinite(n.at)).map(n => ({ at: n.at, title: String(n.title || '').slice(0, 120), body: String(n.body || '').slice(0, 240), tag: String(n.tag || '').slice(0, 60) }));
+    const ids = (await env.KV.get('links:' + k, 'json')) || [];
+    let n = 0;
+    for (const id of ids) { const rec = await env.KV.get('sub:' + id, 'json'); if (!rec) continue; rec.notifications = notifications; rec.syncedAt = Date.now(); await env.KV.put('sub:' + id, JSON.stringify(rec)); n++; }
+    return json({ ok: true, devices: n });
+  }
   if (!validSub(data.subscription)) return json({ error: 'bad subscription' }, 400);
   const id = await sha(data.subscription.endpoint);
 
@@ -99,6 +126,10 @@ async function handle(req, env) {
     if (data.backup && typeof data.backup === 'object') await env.KV.put('backup:' + id, JSON.stringify(data.backup).slice(0, 180000));
     const subs = await index(env);
     if (!subs.includes(id)) { subs.push(id); while (subs.length > 20) subs.shift(); await env.KV.put('subs', JSON.stringify(subs)); }
+    if (KEY_RE.test(String(data.syncKey || ''))) {
+      const lk = 'links:' + data.syncKey, ids = (await env.KV.get(lk, 'json')) || [];
+      if (!ids.includes(id)) { ids.push(id); await env.KV.put(lk, JSON.stringify(ids.slice(-10))); }
+    }
     return json({ ok: true, id, count: notifications.length });
   }
   if (url.pathname === '/test') {

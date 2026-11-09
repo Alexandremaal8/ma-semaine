@@ -33,10 +33,45 @@ function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add
 
 /* ---------- persistence + server sync ---------- */
 let syncTimer = null;
+/* ---------- sync between your devices ---------- */
+const KEY_LS = LS + '-key', UPD_LS = LS + '-upd';
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { } };
+const syncKey = () => lsGet(KEY_LS);
+const localUpdated = () => +(lsGet(UPD_LS) || 0);
+let pulling = false;
+async function pull(force) {
+  const k = syncKey(); if (!WORKER || !k) return false;
+  pulling = true;
+  try {
+    const r = await (await fetch(WORKER + '/store?k=' + k, { cache: 'no-store' })).json();
+    if (r && r.state && (force || r.updated > localUpdated())) {
+      const notifOn = state.notif.on;              // reminders are per device
+      state = L.normalize(r.state); state.notif.on = notifOn;
+      lsSet(LS, JSON.stringify(state)); lsSet(UPD_LS, String(r.updated));
+      renderAll();
+      return true;
+    }
+    if (r && !r.state && localUpdated()) pushState();
+  } catch (e) { console.warn('pull', e); }
+  finally { pulling = false; }
+  return false;
+}
+async function pushState() {
+  const k = syncKey(); if (!WORKER || !k) return;
+  try {
+    const r = await (await fetch(WORKER + '/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ k, updated: localUpdated() || Date.now(), state }) })).json();
+    if (r && r.newer) await pull(true);
+  } catch (e) { console.warn('push', e); }
+}
+const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+const linkUrl = k => location.origin + location.pathname + '#lien-' + k;
+
 function save() {
   const keys = Object.keys(state.done).sort();
   while (keys.length > 12) delete state.done[keys.shift()];
   try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) { }
+  lsSet(UPD_LS, String(Date.now()));
   clearTimeout(syncTimer); syncTimer = setTimeout(syncAll, 2500);
 }
 async function getSub() {
@@ -47,14 +82,19 @@ async function getSub() {
 const post = (path, body) => fetch(WORKER + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 async function syncAll() {
   if (!WORKER) return;
+  if (syncKey() && !pulling) await pushState();
   try {
     if (state.widgetToken) await post('/agenda', { token: state.widgetToken, mode: MODE_META[cfgOf(iso(mondayOf(new Date()))).mode].name, agenda: L.buildAgenda(state, new Date(), 3) });
   } catch (e) { console.warn('agenda', e); }
-  if (!state.notif.on) return;
+  const sub = state.notif.on ? await getSub().catch(() => null) : null;
+  if (!sub) {
+    // this device has no reminders (e.g. your PC): refresh the reminders of your other devices
+    if (syncKey()) post('/notifs', { k: syncKey(), notifications: L.buildNotifications(state, new Date(), 14) }).catch(() => { });
+    return;
+  }
   try {
-    const sub = await getSub(); if (!sub) return;
     const notifications = L.buildNotifications(state, new Date(), 14);
-    const r = await post('/sync', { subscription: sub.toJSON(), notifications, backup: state });
+    const r = await post('/sync', { subscription: sub.toJSON(), notifications, backup: state, syncKey: syncKey() || undefined });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     localStorage.setItem(LS + '-sync', JSON.stringify({ t: Date.now(), n: notifications.length }));
     if (tab === 'set') renderSet();
@@ -617,6 +657,13 @@ function renderSet() {
       <button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">Cette semaine : ${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">${c.source === 'manual' ? 'Choisi par toi' : c.source === 'auto' ? 'Automatique · ' + esc(c.why) : 'Mode habituel'}</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="baseModeSheet"><span class="bd"><span class="ti">Mode habituel : ${MODE_META[state.mode].name}</span><span class="su">Pour les semaines sans rien de spécial</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>`; })()}
+    <div class="sec-t">Mes appareils</div>
+    <div class="group">${syncKey()
+      ? `<div class="status"><b>Synchro activée</b>Tes données sont les mêmes sur tous les appareils reliés. Sur un autre appareil, ouvre le lien de connexion.</div>
+         <button type="button" class="li" data-act="syncShow"><span class="bd"><span class="ti">Relier un autre appareil</span><span class="su">Lien et code de connexion</span></span>${CHEV}</button>
+         <button type="button" class="li" data-act="syncOff"><span class="bd"><span class="ti">Délier cet appareil</span><span class="su">Il garde ses données mais ne se synchronise plus</span></span></button>`
+      : `<div class="status"><b>Ouvrir l’app sur ton PC</b>Relie tes appareils pour avoir le même planning, les mêmes cases cochées et le même retard partout.</div>
+         <div class="btns"><button type="button" class="btn pri" data-act="syncStart">Relier un appareil</button><button type="button" class="btn" data-act="syncEnter">J’ai un code</button></div>`}</div>
     <div class="sec-t">Widget</div>
     <div class="group"><button type="button" class="li" data-act="widgetSheet"><span class="bd"><span class="ti">Widget pour l’écran d’accueil</span><span class="su">Ton programme sans ouvrir l’app</span></span>${CHEV}</button></div>
     <div class="sec-t">Sauvegarde</div>
@@ -624,6 +671,20 @@ function renderSet() {
     <p class="hint" style="margin-top:14px;text-align:center">EPFL Calendar · version ${esc(self.APP_VERSION || 'dev')}</p>`;
 }
 
+function syncSheet() {
+  const k = syncKey();
+  openSheet('Relier un appareil', `<p style="margin:0 0 12px;color:var(--muted)">Sur ton PC, ouvre ce lien dans ton navigateur. Le plus simple : copie-le et envoie-le-toi (WhatsApp, mail…).</p>
+    <div class="group"><div class="status" style="word-break:break-all;font-family:var(--f-mono);font-size:13px">${esc(linkUrl(k))}</div></div>
+    <div class="sh-actions"><button type="button" class="btn pri" data-act="syncCopy">Copier le lien</button></div>
+    <p class="hint" style="margin-top:14px">Ou, sur l’autre appareil : Réglages → « J’ai un code », et tape :<br><b style="font-family:var(--f-mono);color:var(--ink);letter-spacing:.04em">${esc(k.match(/.{1,4}/g).join(' '))}</b></p>
+    <p class="hint" style="margin-top:10px">Garde ce lien pour toi : il donne accès à ton planning.</p>`);
+}
+async function linkWith(k) {
+  lsSet(KEY_LS, k);
+  const got = await pull(true);
+  renderSet();
+  showCard(got ? 'Appareil relié' : 'Code enregistré', got ? 'Ton planning est maintenant le même ici et sur ton autre appareil.' : 'Aucune donnée trouvée pour ce code pour l’instant.');
+}
 function widgetScript() {
   return `// EPFL Calendar — widget Scriptable
 const URL_ = "${WORKER}/agenda?t=${state.widgetToken}";
@@ -750,6 +811,15 @@ document.addEventListener('click', async e => {
     case 'notifOff': disableNotifs(); return;
     case 'testNotif': { const sub = await getSub(); if (!sub || !WORKER) { toast('Rappels pas activés'); return; } const r = await post('/test', { subscription: sub.toJSON() }).then(r => r.json()).catch(() => ({})); toast(r.ok ? 'Notif de test envoyée' : 'Échec de l’envoi'); return; }
     case 'widgetSheet': widgetSheet(); return;
+    case 'syncStart': {
+      if (!WORKER) { toast('Serveur pas encore en ligne'); return; }
+      if (!syncKey()) { lsSet(KEY_LS, newKey()); if (!localUpdated()) lsSet(UPD_LS, String(Date.now())); await pushState(); }
+      renderSet(); syncSheet(); return;
+    }
+    case 'syncShow': syncSheet(); return;
+    case 'syncCopy': copyText(linkUrl(syncKey()), 'Lien copié. Envoie-le-toi et ouvre-le sur ton PC.'); return;
+    case 'syncEnter': openSheet('Relier avec un code', `<div class="fields">${F.text('code', 'Code de connexion', '', 'full', 'les 32 caractères affichés sur ton autre appareil')}</div><p class="hint" style="margin-top:10px">Les données de l’autre appareil remplacent celles d’ici.</p><div class="sh-actions"><button type="submit" class="btn pri">Relier</button></div>`, fd => { const c = String(fd.code || '').toLowerCase().replace(/[^a-f0-9]/g, ''); if (c.length !== 32) { toast('Code invalide : il fait 32 caractères'); return false; } linkWith(c); }); return;
+    case 'syncOff': lsSet(KEY_LS, null); renderSet(); toast('Appareil délié'); return;
     case 'copyWidget': copyText(widgetScript(), 'Script copié. Colle-le dans Scriptable.'); return;
     case 'export': copyText(JSON.stringify(state), 'Sauvegarde copiée. Colle-la dans tes Notes.'); return;
     case 'importShow': openSheet('Restaurer', `<textarea class="box" name="txt" placeholder="Colle ta sauvegarde ici"></textarea><div class="sh-actions"><button type="submit" class="btn pri">Restaurer</button></div>`, fd => { try { state = L.normalize(JSON.parse(fd.txt)); save(); renderAll(); toast('Sauvegarde restaurée'); } catch (err) { toast('Texte illisible'); return false; } }); return;
@@ -783,14 +853,23 @@ document.addEventListener('pointerdown', e => {
 /* ---------- boot ---------- */
 renderAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => r.update().catch(() => { })).catch(e => console.warn('sw', e));
-syncAll();
-rollover();
-setTimeout(autoCheck, 800);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { rollover(); setTimeout(autoCheck, 300); }
+(async () => {
+  // opened from a link like …/#lien-<code>: join that device's planning
+  const m = /^#lien-([a-f0-9]{32})$/.exec(location.hash);
+  if (m) { history.replaceState(null, '', location.pathname); await linkWith(m[1]); }
+  else await pull(false);
+  rollover();
+  setTimeout(autoCheck, 300);
+  syncAll();
+})();
+document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
+  await pull(false);
+  rollover(); setTimeout(autoCheck, 300);
   if (tab === 'today') keepScroll(renderToday);
   syncAll();
 });
+// keep two open devices in step
+setInterval(() => { if (document.visibilityState === 'visible' && syncKey()) pull(false); }, 45000);
 setInterval(() => { if (document.visibilityState === 'visible' && tab === 'today') keepScroll(renderToday); }, 60000);
 })();
