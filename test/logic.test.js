@@ -86,3 +86,16 @@ console.log(bad?'FAIL '+bad:'OK');
  const n=d[0].ev.filter(e=>/Revoir le cours/.test(e.title)).length;console.log('prépa physique affichée',n,'fois');if(n!==1)fail('fixed block duplicated');
  for(const x of d){const b=x.ev.filter(e=>e.end>e.start).sort((a,b)=>a.start-b.start);for(let i=1;i<b.length;i++)if(b[i].start<b[i-1].end)fail('overlap',x.d,b[i-1].title,b[i].title)}}
 console.log(bad?'FAIL '+bad:'OK');
+// 14. "Finir la série" marker; ticking it early frees the remaining série blocks, correction stays
+{const S=L.defaultState();S.since=0;const now=new Date(2026,10,9,6,0),ws=L.mondayOf(now),key=L.iso(ws);let d=L.generate(S,ws,now);
+ const ms=d.flatMap(x=>x.ev.filter(e=>e.kind==='milestone').map(e=>L.DAYS[x.d]+' '+L.fmt(e.start)+' '+e.title+' · '+e.sub));console.log('repères:',ms.join(' | '));
+ if(ms.length!==5)fail('one marker per subject');
+ const before=d.flatMap(x=>x.ev).filter(e=>e.kind==='study'&&e.subj==='ana'&&e.serie&&!e.corr).length;
+ S.serieDone={[key]:{ana:true}};d=L.generate(S,ws,now);
+ const after=d.flatMap(x=>x.ev).filter(e=>e.kind==='study'&&e.subj==='ana'&&e.serie&&!e.corr).length;
+ const corr=d.flatMap(x=>x.ev).filter(e=>e.subj==='ana'&&e.corr).length;
+ console.log('blocs série analyse',before,'→',after,'| correction gardée',corr);if(after!==0||corr<1)fail('serieDone');
+ // partial: half of a block counts half
+ S.serieDone={};const e=L.generate(S,ws,now)[0].ev.find(x=>x.kind==='study');S.done[key]={[e.id]:{s:e.subj,t:e.title,m:Math.round((e.end-e.start)/2),d:0,a:e.start,serie:true,p:.5}};
+ const d2=L.generate(S,ws,now);const e2=d2[0].ev.find(x=>x.id===e.id);console.log('bloc à moitié:',e2.state,e2.part);if(e2.part!==.5)fail('partial');}
+console.log(bad?'FAIL '+bad:'OK');

@@ -433,7 +433,8 @@ function generate(S0, weekStart, now) {
     const c = (S.coursesOn && su.serie && !deferred ? (+su.corr || 0) : 0) + fromPrev;
     const av = corrAvail(S0, weekStart, su);
     corrFrom[su.id] = fromPrev && !(S.coursesOn && su.serie && !deferred) ? null : (av && !deferred ? av : null);
-    const v = (S.coursesOn ? (+su.serie || 0) : 0) + c + (carry[su.id] || 0);
+    const sDone = !!((S.serieDone || {})[key] || {})[su.id];
+    const v = (S.coursesOn && !sDone ? (+su.serie || 0) : 0) + c + (carry[su.id] || 0);
     corr[su.id] = c;
     if (v > 0) { must[su.id] = v; mustTotal += v; }
   }
@@ -606,8 +607,9 @@ function generate(S0, weekStart, now) {
   const doneMap = S.done[key] || {};
   const { by: doneBy } = doneBySubject(S, key);
   const mustLeft = {}, carryLeft = {}, revLeft = {}, corrLeft = {};
+  const serieMin = {}; for (const v of Object.values(doneMap)) if (v && typeof v === 'object' && v.serie && !v.c && !v.b && v.s) serieMin[v.s] = (serieMin[v.s] || 0) + (v.m || 0);
   for (const su of S.subjects) {
-    const dn = doneBy[su.id] || 0;
+    const dn = (doneBy[su.id] || 0) - (((S.serieDone || {})[key] || {})[su.id] ? (serieMin[su.id] || 0) : 0);
     const mu = must[su.id] || 0;
     mustLeft[su.id] = Math.max(0, mu - dn);
     corrLeft[su.id] = Math.min(corr[su.id] || 0, mustLeft[su.id]);
@@ -630,7 +632,7 @@ function generate(S0, weekStart, now) {
   }
   for (const f of frozen) {
     const id = idOf(f.d, f), rec = doneMap[id];
-    if (rec && typeof rec === 'object') live.push(Object.assign({}, f, { id, title: rec.t || f.title, subj: rec.s, state: 'done' }));
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, f, { id, title: rec.t || f.title, subj: rec.s, state: 'done', part: rec.p }));
     else if (f.endT <= nowT) { const pre = f.endT <= sinceT; if (!pre) lateMin += f.len; live.push(Object.assign({}, f, { id, state: pre ? 'pre' : 'missed' })); }
     else {
       // block in progress at the moment of the change: keeps its task, which comes off the budgets
@@ -642,7 +644,7 @@ function generate(S0, weekStart, now) {
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
     const b = base[i];
-    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, bl: rec.b, late: !!rec.b }));
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
     else if (s.endT <= nowT) {
       const pre = s.endT <= sinceT;
       if (!pre) lateMin += s.len;
@@ -729,7 +731,16 @@ function generate(S0, weekStart, now) {
     if (s.state === 'todo' && x.date.getTime() + s.end * 6e4 <= nowT) s.state = x.date.getTime() + s.end * 6e4 <= sinceT ? 'pre' : 'missed';
     if (s.kind2 === 'ahead') { x.ev.push({ kind: 'free', start: s.start, end: s.end, title: 'Libre', sub: 'T’es en avance', id: s.id }); continue; }
     const su = s.subj ? subjOf(S, s.subj) : null;
-    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len });
+    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part });
+  }
+  // a marker after the last série block of each subject: the série should be finished by then
+  if (S.coursesOn) for (const su of S.subjects) {
+    if (!su.serie) continue;
+    const ticked = !!((S.serieDone || {})[key] || {})[su.id];
+    let last = null;
+    for (const x of days) for (const e of x.ev) if (e.kind === 'study' && e.subj === su.id && e.serie && !e.corr && !e.bl && !/retard/i.test(e.title)) { const t = x.date.getTime() + e.end * 6e4; if (!last || t > last.t) last = { t, x, end: e.end }; }
+    if (!last) continue;
+    last.x.ev.push({ kind: 'milestone', start: last.end, end: last.end, title: 'Finir la ' + (wkN ? 'série ' + wkN : 'série'), sub: su.name + (ticked ? ' · finie' : ' · coche quand la série est finie'), subj: su.id, id: 'ms-' + su.id, state: ticked ? 'done' : 'todo' });
   }
   // free time and days off
   for (const x of days) {
@@ -750,7 +761,7 @@ function generate(S0, weekStart, now) {
     // meals and trips are only markers: if a block kept from earlier sits on one, the marker gives way
     const solid = x.ev.filter(e => e.end > e.start && !['meal', 'move', 'rest', 'free'].includes(e.kind));
     x.ev = x.ev.filter(e => !['meal', 'move'].includes(e.kind) || !solid.some(o => o.start < e.end && o.end > e.start));
-    x.ev.sort((a, b) => a.start - b.start);
+    x.ev.sort((a, b) => a.start - b.start || (a.kind === 'milestone') - (b.kind === 'milestone'));
     x.ev.forEach(e => { if (!e.id) e.id = x.d + '-' + e.start + '-' + e.kind + (e.eid ? '-' + e.eid : ''); });
     x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
     x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);

@@ -21,7 +21,8 @@ for(let run=0;run<120;run++){
     // check some blocks that are due
     const key=L.iso(ws);S.done[key]=S.done[key]||{};
     for(const x of days)for(const e of x.ev)if(e.kind==='study'&&e.state!=='done'&&x.date.getTime()+e.start*6e4<now.getTime()&&rnd()<.5)
-      S.done[key][e.id]={s:e.subj,t:e.title,m:e.end-e.start,d:x.d,a:e.start,serie:e.serie,fx:!!e.fixed,b:e.bl||undefined};
+      {const f=pick([1,1,.75,.5,.25]);S.done[key][e.id]={s:e.subj,t:e.title,m:Math.round((e.end-e.start)*f),d:x.d,a:e.start,serie:e.serie,c:e.corr||undefined,fx:!!e.fixed,b:e.bl||undefined,p:f<1?f:undefined};}
+    if(rnd()<.1){S.serieDone=S.serieDone||{};(S.serieDone[key]=S.serieDone[key]||{})[pick(['ana','alg','phy','aicc','prog'])]=1;}
     // a change: freeze first, then mutate; the past must not move
     const r=rnd();
     if(r<.5){

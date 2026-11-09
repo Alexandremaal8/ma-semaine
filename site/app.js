@@ -134,7 +134,7 @@ function openSheet(title, html, onSubmit) {
   $('#sheetBg').classList.add('on');
   document.body.style.overflow = 'hidden';
 }
-function closeSheet() { clearInterval(stretchTimer); $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
+function closeSheet() { clearInterval(stretchTimer); if (ciOpen) { ciOpen = false; ciQueue = []; ciSkipUntil = Date.now() + 2 * 3600e3; setTimeout(() => { renderAll(); endChange(); }, 0); } $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
 $('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { beginChange(); const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
 
@@ -487,6 +487,13 @@ function renderToday() {
 
   const rows = [`<div class="it k-minor"><span class="tm">${fmt(day.wake)}</span><span class="minor">Réveil</span></div>`];
   for (const e of main) {
+    if (e.kind === 'milestone') {
+      const su = subjOf(state, e.subj);
+      rows.push(`<div class="it k-ms${e.state === 'done' ? ' done' : ''}" style="--c:${esc(su ? su.color : '')}"><span class="tm">${fmt(e.start)}</span>
+        <div class="ms"><span class="flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><span class="bd"><b>${esc(e.title)}</b><small>${esc(e.sub)}</small></span>
+        <button type="button" class="chk" data-act="msDone" data-w="${key}" data-v="${esc(e.subj)}" aria-pressed="${e.state === 'done'}" aria-label="${esc(e.title)} : ${esc(su ? su.name : '')}">${CHECK}</button></div></div>`);
+      continue;
+    }
     if (MINOR.has(e.kind)) { rows.push(`<div class="it k-minor"><span class="tm">${fmt(e.start)}</span><span class="minor">${esc(e.title)}</span></div>`); continue; }
     const su = e.subj ? subjOf(state, e.subj) : null;
     const isDone = e.kind === 'study' ? e.state === 'done' : !!sm.done[e.id];
@@ -496,13 +503,14 @@ function renderToday() {
     if (e.state === 'missed') cls.push('missed');
     else if ((isToday && e.end <= mins) || isPastDay) cls.push('past');
     if (isDone) cls.push('done');
-    const tags = (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
+    const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
-  $('#todayBody').innerHTML = `${pickWeek}${hero}${late}${advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
+  const prop = thisWeek ? proposal(ws, key, M, wmode) : '';
+  $('#todayBody').innerHTML = `${pickWeek}${hero}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
     <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
 }
@@ -537,6 +545,71 @@ function renderCal() {
     <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Off</span><span><i class="i-trip"></i>Voyage</span><span><i class="i-mock"></i>Exam blanc</span><span><i class="i-ex"></i>Examen</span></div>
     <div class="sec-t">${longDate(sel)}<button type="button" data-act="openDay">Voir la journée</button></div>
     <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour ajouter quelque chose.</div>'}</div>`;
+}
+
+/* ---------- "T'as fini ?" after a block ---------- */
+let ciQueue = [], ciOpen = false, ciSkipUntil = 0;
+function ciCandidates() {
+  const nowT = Date.now(), out = [];
+  for (const k of [-7, 0]) {
+    const ws = addDays(mondayOf(new Date()), k), wk = iso(ws), asked = (state.asked || {})[wk] || {};
+    if (ws.getTime() + 7 * 864e5 < (state.since || 0)) continue;
+    for (const x of L.generate(state, ws)) for (const e of x.ev) {
+      if (e.kind !== 'study' || e.state !== 'missed' || asked[e.id]) continue;
+      const endT = x.date.getTime() + e.end * 6e4;
+      if (nowT - endT > 36 * 3600e3) continue;
+      out.push({ wk, id: e.id, e, date: x.date, endT });
+    }
+  }
+  return out.sort((a, b) => a.endT - b.endT).slice(0, 6);
+}
+function checkIn(force) {
+  if (ciOpen || (!force && Date.now() < ciSkipUntil) || $('#sheetBg').classList.contains('on')) return;
+  ciQueue = ciCandidates(); if (!ciQueue.length) return;
+  beginChange(); ciOpen = true; ciShow();
+}
+function ciShow() {
+  const c = ciQueue[0]; if (!c) { ciOpen = false; closeSheet(); renderAll(); endChange('Emploi du temps mis à jour', 'avec ce que t’as fait'); return; }
+  const su = subjOf(state, c.e.subj);
+  const opt = (f, t, cls) => `<button type="button" class="btn ${cls || ''}" data-act="ciAns" data-v="${f}">${t}</button>`;
+  openSheet('T’as fini ce bloc ?', `<div class="ci-card" style="--c:${esc(su ? su.color : 'var(--faint)')}"><span class="num">${DAYS[dow(c.date)]} ${fmt(c.e.start)}–${fmt(c.e.end)}</span><b>${esc(c.e.title)}</b><small>${esc(su ? su.name : '')}</small></div>
+    <div class="ci-opts">${opt(1, 'Oui, fini', 'pri')}${opt(.75, 'Presque (¾)')}${opt(.5, 'À moitié')}${opt(.25, 'Un peu (¼)')}${opt(0, 'Pas fait')}</div>
+    <p class="hint" style="margin-top:12px">Ce qui reste est replacé tout seul dans ta semaine.${ciQueue.length > 1 ? ' Encore ' + (ciQueue.length - 1) + ' bloc' + (ciQueue.length > 2 ? 's' : '') + ' à faire le point.' : ''}</p>
+    <button type="button" class="linkbtn" data-act="ciLater">Plus tard</button>`);
+}
+function ciAnswer(f) {
+  const c = ciQueue.shift(); if (!c) return;
+  if (f > 0) {
+    const d = state.done[c.wk] = state.done[c.wk] || {}, e = c.e, len = e.end - e.start;
+    d[c.id] = { s: e.subj, t: e.title, m: Math.round(len * f), d: dow(c.date), a: e.start, serie: e.serie, c: !!e.corr || undefined, b: e.bl || undefined, p: f < 1 ? f : undefined };
+  } else { state.asked = state.asked || {}; (state.asked[c.wk] = state.asked[c.wk] || {})[c.id] = 1; }
+  const keys = Object.keys(state.asked || {}).sort(); while (keys.length > 3) delete state.asked[keys.shift()];
+  save(); ciShow();
+}
+/* Suggestions you accept or not */
+function proposal(ws, key, M, wmode) {
+  const dis = state.dismiss || {};
+  // 1. leaving Rattrapage once the late work is caught up
+  if (wmode === 'rattrapage' && (M.blTotal || 0) < 30 && M.mustLeftAfter === 0 && M.lateMin < 60 && !dis[key + ':exitR']) {
+    const rec = L.recommendMode(state, ws); let sug = rec && rec.mode !== 'rattrapage' ? rec.mode : state.mode;
+    if (sug === 'rattrapage') sug = 'normal';
+    const alt = sug === 'charbon' ? 'normal' : 'charbon';
+    return `<div class="prop"><b>Ton retard est rattrapé.</b><p>Je te propose de repasser en <b>${MODE_META[sug].name}</b>${rec && rec.mode === sug ? ' (' + esc(rec.why) + ')' : ''} pour le reste de la semaine. Ce qui est passé ne bouge pas.</p>
+      <div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="setMode" data-v="${sug}" data-w="${key}">${MODE_META[sug].name}</button><button type="button" class="btn" data-act="setMode" data-v="${alt}" data-w="${key}">${MODE_META[alt].name}</button><button type="button" class="btn" data-act="dismiss" data-v="${key}:exitR">Rester</button></div></div>`;
+  }
+  // 2. your séries take more (or less) time than planned
+  for (const su of state.subjects) {
+    const log = ((state.serieLog || {})[su.id] || []).slice(-2);
+    if (log.length < 2 || !su.serie) continue;
+    const diffs = log.map(x => x.m - su.serie);
+    if (!(diffs.every(d => d >= 30) || diffs.every(d => d <= -30))) continue;
+    const avg = Math.round(log.reduce((a, x) => a + x.m, 0) / log.length / 30) * 30;
+    const id = 'est:' + su.id + ':' + log[log.length - 1].wk;
+    if (dis[id] || avg === su.serie || avg < 30) continue;
+    return `<div class="prop"><b>La série de ${esc(su.name)} te prend plutôt ${hm(avg)}.</b><p>Les 2 dernières semaines : ${log.map(x => hm(x.m)).join(' et ')}, pour ${hm(su.serie)} prévues. J’ajuste le planning ?</p>
+      <div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="serieAdjust" data-v="${esc(su.id)}" data-m="${avg}">Passer à ${hm(avg)}</button><button type="button" class="btn" data-act="dismiss" data-v="${id}">Garder ${hm(su.serie)}</button></div></div>`;
+  }
+  return '';
 }
 
 /* ---------- Stretching ---------- */
@@ -801,7 +874,7 @@ async function copyText(txt, okMsg) {
 }
 
 /* ---------- Events ---------- */
-const MUTATING = new Set(['setMode', 'offDay', 'weekendOff', 'importDo']);
+const MUTATING = new Set(['dismissNOP', 'setMode', 'offDay', 'weekendOff', 'importDo']);
 document.addEventListener('click', async e => {
   const nb = e.target.closest('.nav button'); if (nb) { showTab(nb.dataset.tab); return; }
   const tg = e.target.closest('[data-tab-go]'); if (tg) { showTab(tg.dataset.tabGo); return; }
@@ -819,7 +892,7 @@ document.addEventListener('click', async e => {
         const days = L.generate(state, fromIso(wk)); let ev = null;
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
-        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, fx: !!ev.fixed, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
+        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
         b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
       }
       save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;
@@ -830,6 +903,24 @@ document.addEventListener('click', async e => {
     case 'modeSheet': modeSheet(b.dataset.w); return;
     case 'baseModeSheet': baseModeSheet(); return;
     case 'editBacklog': editBacklog(v); return;
+    case 'checkin': { const c = ciCandidates().find(x => x.id === v) || null; if (!c) { toast('Ce bloc est trop ancien pour faire le point'); return; } beginChange(); ciQueue = [c]; ciOpen = true; ciShow(); return; }
+    case 'ciAns': ciAnswer(+v); return;
+    case 'ciLater': ciQueue = []; ciOpen = false; ciSkipUntil = Date.now() + 2 * 3600e3; closeSheet(); renderAll(); endChange(); return;
+    case 'dismiss': state.dismiss = state.dismiss || {}; state.dismiss[v] = 1; save(); renderToday(); return;
+    case 'serieAdjust': { beginChange(); const su = subjOf(state, v); if (su) su.serie = +b.dataset.m; done(); return; }
+    case 'msDone': {
+      beginChange();
+      const wk = b.dataset.w; state.serieDone = state.serieDone || {}; const m = state.serieDone[wk] = state.serieDone[wk] || {};
+      if (m[v]) delete m[v];
+      else {
+        m[v] = 1; b.classList.add('pop');
+        // learn how long this série really took
+        const mins = Object.values(state.done[wk] || {}).filter(r => r && r.s === v && r.serie && !r.c && !r.b).reduce((a, r) => a + (r.m || 0), 0);
+        if (mins >= 30) { state.serieLog = state.serieLog || {}; const lg = (state.serieLog[v] || []).filter(x => x.wk !== wk); lg.push({ wk, m: mins }); state.serieLog[v] = lg.slice(-6); }
+      }
+      setTimeout(() => { save(); renderAll(); endChange(m[v] ? 'Série finie' : 'Série rouverte', (subjOf(state, v) || {}).name || ''); }, m[v] ? 380 : 0);
+      return;
+    }
     case 'stretchSheet': stretchSheet(+v, b.dataset.w, b.dataset.id); return;
     case 'stretchGo': stretchRun(+v, b.dataset.w, b.dataset.id); return;
     case 'stretchStop': clearInterval(stretchTimer); b.textContent = 'Démarrer le minuteur'; b.dataset.act = 'stretchGo'; return;
@@ -905,7 +996,7 @@ document.addEventListener('change', e => {
 
 
 /* ---------- bubble touch effect ---------- */
-const BUB_SEL = '.arrows button,.bl-row .bd,.bl-row .more,.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
+const BUB_SEL = '.ci-opts .btn,.arrows button,.bl-row .bd,.bl-row .more,.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
 document.addEventListener('pointerdown', e => {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const el = e.target.closest(BUB_SEL); if (!el) return;
@@ -925,16 +1016,17 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then
   else await pull(false);
   rollover();
   setTimeout(autoCheck, 300);
+  setTimeout(checkIn, 1200);
   syncAll();
 })();
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
   await pull(false);
-  rollover(); setTimeout(autoCheck, 300);
+  rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000);
   if (tab === 'today') keepScroll(renderToday);
   syncAll();
 });
 // keep two open devices in step
 setInterval(() => { if (document.visibilityState === 'visible' && syncKey()) pull(false); }, 45000);
-setInterval(() => { if (document.visibilityState === 'visible' && tab === 'today') keepScroll(renderToday); }, 60000);
+setInterval(() => { if (document.visibilityState !== 'visible') return; if (tab === 'today') keepScroll(renderToday); checkIn(); }, 60000);
 })();
