@@ -280,6 +280,13 @@ body[data-mode="rattrapage"]{--accent:#B7791F}
 @keyframes ring{from{transform:scale(.6);opacity:.9}to{transform:scale(1.6);opacity:0}}
 .chk{overflow:visible}
 
+/* plan-changed card */
+.upd{position:fixed;left:50%;top:calc(var(--st) + 10px);z-index:45;display:flex;gap:11px;align-items:center;width:min(92vw,420px);padding:12px 14px;border-radius:16px;background:var(--surface);border:1px solid var(--line);box-shadow:0 10px 30px rgba(10,5,20,.18);transform:translate(-50%,-140%);opacity:0;pointer-events:none;transition:transform .5s cubic-bezier(.3,1.5,.5,1),opacity .25s}
+.upd.on{transform:translate(-50%,0);opacity:1}
+.upd .ic{width:32px;height:32px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--accent);color:#fff;background-image:linear-gradient(180deg,rgba(255,255,255,.3),rgba(255,255,255,0) 60%)}
+.upd .ic svg{width:17px;height:17px}
+.upd b{display:block;font-size:15px}
+.upd small{display:block;font-size:13px;color:var(--muted);line-height:1.35;margin-top:1px}
 @media (prefers-reduced-motion:reduce){.bub,.chk.pop,.chk.pop::after{animation:none}}
 .fab{position:fixed!important}
 body[data-mode="avance"]{--accent:#0F766E}
@@ -338,6 +345,7 @@ body[data-mode="avance"]{--accent:#0F766E}
 
 <div class="sheet-bg" id="sheetBg"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="grab"></div><div class="sh-h"><h2 id="shTitle"></h2><button type="button" data-act="closeSheet" aria-label="Fermer">✕</button></div><form id="shBody" autocomplete="off"></form></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="upd" id="upd" role="status" aria-live="polite"></div>
 
 <script src="config.js?v=__VERSION__"></script>
 <script src="logic.js?v=__VERSION__"></script>

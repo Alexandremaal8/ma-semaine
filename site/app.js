@@ -96,7 +96,7 @@ function openSheet(title, html, onSubmit) {
 }
 function closeSheet() { $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
-$('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { L.freezePast(state); const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
+$('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { beginChange(); const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
 
 const F = {
   text: (n, l, v, cls = 'full', ph = '') => `<div class="f ${cls}"><label for="f-${n}">${l}</label><input id="f-${n}" name="${n}" type="text" value="${esc(v)}" placeholder="${esc(ph)}"></div>`,
@@ -192,12 +192,12 @@ function weekendOff(wk) {
   const on = state.offDays.includes(sat) && state.offDays.includes(sun);
   state.offDays = state.offDays.filter(x => x !== sat && x !== sun);
   if (!on) state.offDays.push(sat, sun);
-  toast(on ? 'Week-end off annulé' : 'Week-end off : la semaine s’adapte'); done();
+  done();
 }
 function toggleOff(di) {
   const i = state.offDays.indexOf(di);
-  if (i >= 0) { state.offDays.splice(i, 1); toast('Jour off annulé'); }
-  else { state.offDays.push(di); toast('Jour off : le reste de la semaine s’adapte'); }
+  if (i >= 0) state.offDays.splice(i, 1);
+  else state.offDays.push(di);
   done();
 }
 function editExam(subjId, date) {
@@ -317,7 +317,40 @@ function weekSheet() {
     <div class="sec-t" style="margin-top:20px">Par matière</div>
     <div class="group" style="padding:2px 14px">${state.subjects.map(s => { const p = sm.per[s.id] || { plan: 0, done: 0 }; return `<div class="subrow" style="--c:${esc(s.color)}"><span>${esc(s.name)}</span><span class="num">${p.done ? hm(p.done) : '0'} / ${hm(p.plan)}</span><span class="bar"><b style="width:${p.plan / max * 100}%"></b><i style="width:${p.done / max * 100}%"></i></span></div>`; }).join('')}</div>`);
 }
-function done() { save(); renderAll(); return true; }
+function done() { save(); renderAll(); endChange(); return true; }
+
+/* ---------- "Emploi du temps modifié" ---------- */
+let pendingSig = null;
+function planSig() {
+  const nowT = Date.now(), blocks = new Set(), mins = {};
+  for (const k of [0, 7]) {
+    const ws = addDays(mondayOf(new Date()), k);
+    for (const x of L.generate(state, ws)) for (const e of x.ev) {
+      if (e.kind !== 'study' || x.date.getTime() + e.start * 6e4 <= nowT) continue;
+      blocks.add([iso(x.date), e.start, e.end, e.subj, e.title].join('|'));
+      const dk = iso(x.date); mins[dk] = (mins[dk] || 0) + e.end - e.start;
+    }
+  }
+  return { blocks, mins };
+}
+function beginChange() { L.freezePast(state); pendingSig = planSig(); }
+function endChange() {
+  if (!pendingSig) return;
+  const a = pendingSig, b = planSig(); pendingSig = null;
+  let added = 0, removed = 0;
+  b.blocks.forEach(k => { if (!a.blocks.has(k)) added++; });
+  a.blocks.forEach(k => { if (!b.blocks.has(k)) removed++; });
+  const moved = Math.max(added, removed);
+  const deltas = [...new Set([...Object.keys(a.mins), ...Object.keys(b.mins)])]
+    .map(k => [k, (b.mins[k] || 0) - (a.mins[k] || 0)]).filter(x => Math.abs(x[1]) >= 10)
+    .sort((x, y) => Math.abs(y[1]) - Math.abs(x[1])).slice(0, 3)
+    .map(([k, d]) => { const dt = fromIso(k); return `${DAYS[dow(dt)].toLowerCase()} ${dt.getDate()} ${d > 0 ? '+' : '−'}${hm(Math.abs(d))}`; });
+  const detail = moved ? `${moved} bloc${moved > 1 ? 's' : ''} réorganisé${moved > 1 ? 's' : ''}${deltas.length ? ' · ' + deltas.join(', ') : ''}` : 'Rien à déplacer, tout tient déjà.';
+  const el = $('#upd');
+  el.innerHTML = `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span><b>Emploi du temps modifié</b><small>${esc(detail)}</small></span>`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  clearTimeout(endChange._t); endChange._t = setTimeout(() => el.classList.remove('on'), 3800);
+}
 
 /* ---------- Aujourd'hui ---------- */
 function renderToday() {
@@ -564,7 +597,7 @@ document.addEventListener('click', async e => {
   const nb = e.target.closest('.nav button'); if (nb) { showTab(nb.dataset.tab); return; }
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
-  if (MUTATING.has(a)) L.freezePast(state);
+  if (MUTATING.has(a)) beginChange();
   switch (a) {
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
@@ -585,7 +618,7 @@ document.addEventListener('click', async e => {
     case 'weekendOff': weekendOff(v); closeSheet(); return;
     case 'hoursSheet': hoursSheet(); return;
     case 'modeSheet': modeSheet(b.dataset.w); return;
-    case 'setMode': { const wk = b.dataset.w || wkOf(selDate); state.weekModes[wk] = v; if (wk >= iso(mondayOf(new Date()))) state.mode = v; save(); renderAll(); closeSheet(); toast('Mode ' + MODE_META[v].name + (wk === iso(mondayOf(new Date())) ? '' : ' pour la semaine du ' + dateLbl(fromIso(wk)))); return; }
+    case 'setMode': { const wk = b.dataset.w || wkOf(selDate); state.weekModes[wk] = v; if (wk >= iso(mondayOf(new Date()))) state.mode = v; save(); renderAll(); closeSheet(); if (wk >= iso(mondayOf(new Date())) && wk <= iso(addDays(mondayOf(new Date()), 7))) endChange(); else { pendingSig = null; toast('Mode ' + MODE_META[v].name + ' pour la semaine du ' + dateLbl(fromIso(wk))); } return; }
     case 'tuneMode': tuneMode(v); return;
     case 'newMock': editMock(null, calSel); return;
     case 'editMock': editMock(v); return;
@@ -615,12 +648,12 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.dataset.courses) L.freezePast(state);
+  if (t.dataset.courses) beginChange();
   if (t.dataset.courses) {
     const wk = t.dataset.courses; state.noCourseWeeks = state.noCourseWeeks.filter(x => x !== wk);
     if (!t.checked) state.noCourseWeeks.push(wk);
     if (!state.weekModes[wk]) state.weekModes[wk] = cfgOf(wk).mode;
-    save(); renderToday(); renderSet(); toast(t.checked ? 'Semaine avec cours' : 'Semaine de travail sans cours'); return;
+    save(); renderToday(); renderSet(); endChange(); return;
   }
   if (t.dataset.nf) { if (t.dataset.nf === 'sport') { state.notif.sport = state.notif.routine = t.checked; state.notif.event = t.checked ? 15 : 0; } else if (t.dataset.nf === 'morning') { state.notif.morning = state.notif.evening = t.checked; } else state.notif[t.dataset.nf] = t.checked; save(); return; }
   if (t.dataset.nfn) { state.notif[t.dataset.nfn] = +t.value; save(); }
