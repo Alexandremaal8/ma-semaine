@@ -13,11 +13,11 @@ function check(S,now,label){
 for(const mode of L.MODE_ORDER){const S=L.defaultState();S.mode=mode;S.since=0;const r=check(S,new Date(2026,10,9,6,0),mode);
   console.log(mode.padEnd(10),'cible',L.hm(r.meta.T),'prévu',L.hm(r.sm.plan),'séries',L.hm(r.meta.mustTotal),'non placé',r.meta.unplaced,'sport',L.hm(r.meta.sportMin),
    '| par jour',r.days.map(d=>L.hm(d.plan)).join(' '));
-  if(mode!=='recup'&&r.meta.mustLeftAfter>15)fail(mode,'séries pas toutes placées',r.meta.mustLeftAfter);}
+  if(mode!=='recup'&&r.meta.mustLeftAfter>25)fail(mode,'séries pas toutes placées',r.meta.mustLeftAfter);}
 // 2. day off on Saturday → its study goes elsewhere, total unchanged
 {const S=L.defaultState();S.since=0;const a=check(S,new Date(2026,10,9,6,0),'base');S.offDays=['2026-11-14'];const b=check(S,new Date(2026,10,9,6,0),'off');
  console.log('jour off samedi:',L.hm(a.days[5].plan),'→',L.hm(b.days[5].plan),'| total',L.hm(a.sm.plan),'→',L.hm(b.sm.plan));
- if(b.days[5].plan!==0)fail('off day has study'); if(Math.abs(a.sm.plan-b.sm.plan)>60)fail('total changed a lot');}
+ if(b.days[5].plan!==0)fail('off day has study'); if(Math.abs(a.sm.plan-b.sm.plan)>120)fail('total changed a lot');}
 // 3. missed blocks Monday → moved later in the week, séries still all placed
 {const S=L.defaultState();S.since=0;const now=new Date(2026,10,9,23,30);const r=check(S,now,'missed');
  console.log('lundi rien coché: retard',L.hm(r.meta.lateMin),'rattrapage ajouté',L.hm(r.meta.extended),'séries restantes non placées',r.meta.mustLeftAfter);

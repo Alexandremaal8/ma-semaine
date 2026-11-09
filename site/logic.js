@@ -36,6 +36,51 @@ const REV_LABELS = {
   exam: ['Annales / examen blanc', 'Révision active (fiches, flashcards)', 'Refaire les séries'], recup: ['Relire tranquillement']
 };
 const PRIO_W = [0, 1, 1.6, 2.3];
+/* 5 minutes every morning: 5 gentle exercises, about 1 min each. Never force, never bounce, breathe slowly. */
+const STRETCH = [
+  { name: 'Réveil du dos', moves: [
+    ['Rotations des épaules', '10 grands cercles vers l’arrière, puis 10 vers l’avant, bras relâchés.', 60, false],
+    ['Étirement du cou', 'Oreille vers l’épaule sans lever l’épaule, main posée légèrement sur la tête. 30 s de chaque côté.', 60, true],
+    ['Chat-vache', 'À quatre pattes : dos rond en expirant, dos creux en inspirant, lentement.', 60, false],
+    ['Posture de l’enfant', 'Fesses vers les talons, bras devant, front au sol. Respire dans le dos.', 60, false],
+    ['Flexion avant debout', 'Jambes légèrement pliées, laisse pendre le haut du corps et la tête. Remonte doucement, vertèbre par vertèbre.', 60, false]] },
+  { name: 'Hanches et jambes', moves: [
+    ['Fente basse', 'Un genou au sol, l’autre pied devant, pousse doucement le bassin vers l’avant. 30 s par côté.', 60, true],
+    ['Quadriceps debout', 'Attrape ta cheville derrière toi, genoux serrés, tiens-toi au mur. 30 s par côté.', 60, true],
+    ['Mollets au mur', 'Mains au mur, une jambe tendue derrière, talon au sol. 30 s par côté.', 60, true],
+    ['Papillon assis', 'Plantes des pieds jointes, genoux qui tombent vers l’extérieur, dos droit.', 60, false],
+    ['Rotations de chevilles', '10 cercles par pied dans chaque sens.', 60, false]] },
+  { name: 'Spécial bureau', moves: [
+    ['Ouverture de poitrine', 'Avant-bras contre un cadre de porte, avance doucement le buste. 30 s par côté.', 60, true],
+    ['Poignets', 'Bras tendu, tire doucement les doigts vers toi, paume vers l’avant puis vers toi. 30 s par main.', 60, true],
+    ['Torsion assise', 'Assis, tourne le buste en tenant le dossier de la chaise. 30 s par côté.', 60, true],
+    ['Menton rentré', 'Rentre le menton comme pour faire un double menton, tiens 3 s, 10 fois. Parfait contre la nuque penchée sur les cours.', 60, false],
+    ['Étirement des bras au plafond', 'Doigts croisés, paumes vers le haut, grandis-toi en respirant.', 60, false]] },
+  { name: 'Colonne souple', moves: [
+    ['Chat-vache', 'À quatre pattes, alterne dos rond et dos creux au rythme de ta respiration.', 60, false],
+    ['Fil de l’aiguille', 'À quatre pattes, glisse un bras sous l’autre, épaule au sol. 30 s par côté.', 60, true],
+    ['Torsion allongée', 'Sur le dos, genoux pliés qui tombent d’un côté, regard de l’autre. 30 s par côté.', 60, true],
+    ['Genoux contre la poitrine', 'Sur le dos, serre les genoux et balance doucement de gauche à droite.', 60, false],
+    ['Cobra doux', 'Sur le ventre, mains sous les épaules, soulève juste un peu la poitrine, coudes pliés.', 60, false]] },
+  { name: 'Arrière des jambes', moves: [
+    ['Ischios assis', 'Une jambe tendue, l’autre pliée, penche-toi dos droit vers le pied tendu. 30 s par côté.', 60, true],
+    ['Pigeon allongé', 'Sur le dos, cheville sur le genou opposé, tire la jambe du dessous vers toi. 30 s par côté.', 60, true],
+    ['Fente basse', 'Un genou au sol, bassin vers l’avant. 30 s par côté.', 60, true],
+    ['Flexion avant debout', 'Genoux souples, laisse pendre, remonte lentement.', 60, false],
+    ['Respiration profonde', 'Debout, inspire 4 s en levant les bras, expire 6 s en les descendant.', 60, false]] },
+  { name: 'Tout le corps', moves: [
+    ['Rotations des épaules', '10 cercles vers l’arrière, 10 vers l’avant.', 60, false],
+    ['Inclinaison latérale', 'Un bras au-dessus de la tête, penche-toi sur le côté. 30 s par côté.', 60, true],
+    ['Fente basse', 'Un genou au sol, bassin vers l’avant. 30 s par côté.', 60, true],
+    ['Chat-vache', 'Dos rond, dos creux, lentement.', 60, false],
+    ['Posture de l’enfant', 'Fesses aux talons, bras devant, respire.', 60, false]] },
+  { name: 'Dimanche tranquille', moves: [
+    ['Respiration profonde', 'Inspire 4 s, expire 6 s, épaules relâchées.', 60, false],
+    ['Étirement du cou', 'Oreille vers l’épaule, 30 s par côté.', 60, true],
+    ['Papillon assis', 'Plantes des pieds jointes, dos droit.', 60, false],
+    ['Torsion allongée', 'Sur le dos, genoux d’un côté. 30 s par côté.', 60, true],
+    ['Posture de l’enfant', 'Fesses aux talons, front au sol.', 60, false]] }
+];
 const COMMUTE = 40;
 const MIN_FREE_EVE = 45;
 const SPORT_MIN = 120, SPORT_MAX = 180;
@@ -53,12 +98,18 @@ const dateLbl = d => d.getDate() + ' ' + MONTHS[d.getMonth()];
 const uid = () => Math.random().toString(36).slice(2, 9);
 const dow = d => (d.getDay() + 6) % 7;
 const subjOf = (S, id) => S.subjects.find(x => x.id === id);
+/* Semester week ("semaine 9"): counted from S.semStart; the série of week N is série N */
+function semWeek(S, weekStart) {
+  if (!S.semStart) return null;
+  const n = Math.round((mondayOf(weekStart) - mondayOf(fromIso(S.semStart))) / (7 * 864e5)) + 1;
+  return n >= 1 && n <= 20 ? n : null;
+}
 
 function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 7, mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 8, semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -112,6 +163,10 @@ function normalize(s) {
     if (old.coursesOn === false) out.noCourseWeeks = [iso(mondayOf(new Date()))];
     out.coursesOn = true;
   }
+  if ((old.v || 0) < 8) {
+    if (!out.semStart) out.semStart = '2026-09-14';   // week of 9 Nov 2026 = semaine 9
+    if (!out.blOrder) out.blOrder = 'auto';
+  }
   if ((old.v || 0) < 7) {
     // v6 → v7: the app picks modes by itself; S.mode becomes your usual mode
     out.autoMode = true;
@@ -139,7 +194,7 @@ function normalize(s) {
   if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
   if (!out.rolled || typeof out.rolled !== 'object') out.rolled = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
-  out.v = 7;
+  out.v = 8;
   return out;
 }
 
@@ -197,7 +252,7 @@ function layoutDay(S, m, weekStart, d) {
     const light = tr.edge ? 0 : (+tr.trip.light || 0);
     const gaps = light ? [{ s: 600, e: 600 + light + 30 }] : [];
     const chunk = (gs, limit) => { const res = []; let left = limit; for (const g of gs) { let t = g.s; while (left >= 20 && t + 20 <= g.e) { const len = Math.min(left, g.e - t); res.push({ start: t, end: t + len, len }); left -= len; t += len + (+m.pause); } } return res; };
-    return { d, date, dIso, we, off: !light, trip: tr.trip, tripEdge: tr.edge, wake, sleep, wind: sleep - 30, eveStart: sleep - 30, ev: [], courses: [], firstC: null, goHome: null, gaps, extGaps: [], chunk, cap: light };
+    return { d, date, dIso, we, off: !light, trip: tr.trip, tripEdge: tr.edge, wake, sleep, wind: sleep - 30, eveStart: sleep - 30, ev: [{ kind: 'stretch', start: wake, end: wake + 5, title: 'Stretching · 5 min', sub: STRETCH[d].name }], courses: [], firstC: null, goHome: null, gaps, extGaps: [], chunk, cap: light };
   }
   const off = (S.offDays || []).includes(dIso);
   const dayMocks = (S.mocks || []).filter(x => x.date === dIso && x.end > x.start);
@@ -221,7 +276,7 @@ function layoutDay(S, m, weekStart, d) {
   const ev = [];
   const busy = () => ev.filter(e => e.end > e.start);
   const free = (s, e) => busy().every(b => b.end <= s || b.start >= e);
-  ev.push({ kind: 'meal', start: wake, end: wake + 30, title: 'Petit-déj' });
+  ev.push({ kind: 'stretch', start: wake, end: wake + 5, title: 'Stretching · 5 min', sub: STRETCH[d].name });
   courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
   S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
@@ -231,6 +286,10 @@ function layoutDay(S, m, weekStart, d) {
     if (r.kind === 'study') { if (!S.coursesOn || !subjOf(S, r.subj)) return; ev.push({ kind: 'fixed', start: r.start, end: r.end, title: r.title, subj: r.subj, rid: r.id }); }
     else ev.push({ kind: r.kind === 'sport' ? 'sport' : 'routine', start: r.start, end: r.end, title: r.title, rid: r.id });
   });
+  { // breakfast right after stretching, shortened if something starts early
+    const nextBusy = Math.min(wake + 35, ...busy().filter(b => b.start >= wake + 5).map(b => b.start));
+    if (nextBusy - (wake + 5) >= 15) ev.push({ kind: 'meal', start: wake + 5, end: nextBusy, title: 'Petit-déj' });
+  }
   let goHome = null;
   if (courses.length) {
     if (free(firstC - COMMUTE - 5, firstC - 5)) ev.push({ kind: 'move', start: firstC - COMMUTE - 5, end: firstC - 5, title: 'Maison → EPFL' });
@@ -243,7 +302,7 @@ function layoutDay(S, m, weekStart, d) {
   const wind = sleep - 30;
   ev.push({ kind: 'rest', start: wind, end: sleep, title: 'Écrans off, routine du soir' });
   for (const s of [1140, 1155, 1170, 1185, 1200, 1110, 1095]) if (s + 45 <= wind && free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: 'Souper' }); break; }
-  const eveStart = Math.max(wake + 30, wind - m.freeEve);
+  const eveStart = Math.max(wake + 35, wind - m.freeEve);
   // catch-up window: the first part of the free evening, never below MIN_FREE_EVE of real free time
   const extEnd = Math.min(eveStart + (+m.ext || 0), wind - MIN_FREE_EVE);
   const gapsIn = (lo, hi) => {
@@ -252,7 +311,7 @@ function layoutDay(S, m, weekStart, d) {
     if (hi > t) out.push({ s: t, e: hi });
     return out;
   };
-  const gaps = off ? [] : gapsIn(wake + 30, eveStart);
+  const gaps = off ? [] : gapsIn(wake + 35, eveStart);
   const extGaps = off || extEnd <= eveStart ? [] : gapsIn(eveStart, extEnd);
   const chunk = (gs, limit) => {
     const res = []; let left = limit;
@@ -311,9 +370,31 @@ function backlogCredit(S, id) {
   for (const wk of Object.values(S.done || {})) for (const v of Object.values(wk || {})) if (v && typeof v === 'object' && v.b === id) m += v.m || 0;
   return m;
 }
+function backlogScore(S, x, now) {
+  now = now || new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let score = 0; const why = [];
+  if (x.urgent) { score += 100; why.push('urgent'); }
+  const su = subjOf(S, x.subj);
+  const mk = (S.mocks || []).filter(m => m.subj === x.subj && m.date && fromIso(m.date) >= today).map(m => (fromIso(m.date) - today) / 864e5).sort((a, b) => a - b)[0];
+  if (mk != null && mk <= 14) { score += mk <= 7 ? 60 : 30; why.push('examen blanc dans ' + Math.round(mk) + ' j'); }
+  if (su && su.exam) { const dd = (fromIso(su.exam) - today) / 864e5; if (dd >= 0 && dd <= 28) { score += dd <= 10 ? 70 : 35; why.push('examen dans ' + Math.round(dd) + ' j'); } }
+  const t = (x.title || '').toLowerCase();
+  if (/s[ée]rie/.test(t)) { score += 20; if (!why.length) why.push('série à rendre propre'); }
+  else if (/cours|relire|chapitre/.test(t)) { score += 12; if (!why.length) why.push('cours à rattraper'); }
+  if (su) score += (PRIO_W[su.prio] || 1) * 5;
+  const age = x.created ? (now - x.created) / 864e5 : 0;
+  score += Math.min(30, age * 2);
+  if (age >= 7 && why.length < 2) why.push('en retard depuis ' + Math.round(age) + ' j');
+  // older séries come first: série 6 before série 7
+  const n = /s[ée]rie\s*(\d+)/i.exec(x.title || ''); if (n) score += Math.max(0, 15 - +n[1]) * 0.5;
+  return { score, why: why.slice(0, 2).join(' · ') };
+}
 function backlogOpen(S) {
-  return (S.backlog || []).filter(x => !x.done).map(x => Object.assign({}, x, { credit: backlogCredit(S, x.id), left: Math.max(0, (+x.minutes || 0) - backlogCredit(S, x.id)) }))
-    .sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0) || (a.created || 0) - (b.created || 0));
+  const now = new Date();
+  const list = (S.backlog || []).filter(x => !x.done).map(x => { const c = backlogCredit(S, x.id), p = backlogScore(S, x, now); return Object.assign({}, x, { credit: c, left: Math.max(0, (+x.minutes || 0) - c), score: p.score, why: p.why }); });
+  if (S.blOrder === 'manual') return list.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || (a.created || 0) - (b.created || 0));
+  return list.sort((a, b) => b.score - a.score || (a.created || 0) - (b.created || 0));
 }
 const backlogTotal = S => backlogOpen(S).reduce((a, x) => a + x.left, 0);
 
@@ -341,13 +422,14 @@ function generate(S0, weekStart, now) {
   // must = this week's séries + unfinished séries from last week; revision fills the rest of the target
   const carry = carryOver(S, weekStart);
   // must = séries + checking them against the correction, plus anything unfinished from last week
-  const must = {}, corr = {}, corrFrom = {}; let mustTotal = 0;
+  const must = {}, corr = {}, corrFrom = {}, corrPrev = {}; let mustTotal = 0;
   const prevWs = addDays(weekStart, -7), prevCfg = { coursesOn: coursesOnFor(S0, prevWs) };
   for (const su of S.subjects) {
     // this week's correction only if it comes out before Sunday night; otherwise it moves to next week,
     // and last week's late correction is checked this week
     const deferred = corrDeferred(S0, weekStart, su);
     const fromPrev = prevCfg.coursesOn && su.serie && corrDeferred(S0, prevWs, su) ? (+su.corr || 0) : 0;
+    corrPrev[su.id] = !!fromPrev;
     const c = (S.coursesOn && su.serie && !deferred ? (+su.corr || 0) : 0) + fromPrev;
     const av = corrAvail(S0, weekStart, su);
     corrFrom[su.id] = fromPrev && !(S.coursesOn && su.serie && !deferred) ? null : (av && !deferred ? av : null);
@@ -409,16 +491,34 @@ function generate(S0, weekStart, now) {
   const rev = {}; S.subjects.forEach((su, i) => { rev[su.id] = revPool * ws[i] / wsum; });
 
   const labels = REV_LABELS[S.mode] || REV_LABELS.normal;
-  const serieLabel = (su, isCarry) => isCarry ? 'Série en retard' : 'Série d’exercices';
+  const wkN = semWeek(S, weekStart);
+  const serieLabel = (su, isCarry) => isCarry ? 'Série en retard' : (wkN ? 'Série ' + wkN : 'Série d’exercices');
+  // why a revision block exists: an exam or a mock exam coming up beats the generic label
+  const revReason = (subj, date) => {
+    const mk = (S.mocks || []).find(x => x.subj === subj && x.date && fromIso(x.date) >= date && (fromIso(x.date) - date) / 864e5 <= 10);
+    if (mk) return 'Révision pour l’examen blanc (' + DAYS[dow(fromIso(mk.date))].toLowerCase() + ' ' + fromIso(mk.date).getDate() + ')';
+    const su = subjOf(S, subj);
+    if (su && su.exam && fromIso(su.exam) >= date && (fromIso(su.exam) - date) / 864e5 <= 28) return 'Révision pour l’examen du ' + dateLbl(fromIso(su.exam));
+    return null;
+  };
   const prevCourse = (s) => days[s.d].courses.find(c => c.end <= s.start && c.end >= s.start - 60 && c.type === 'Cours');
 
   // assignment helper: fills slots in order from the given budgets (must first, then revision)
-  function assignInto(list, mustLeft, carryLeft, revLeft, corrLeft, bl) {
+  function assignInto(list, mustLeft, carryLeft, revLeft, corrLeft, bl, prep) {
     const lastByDay = {}; const cnt = {};
     const suffix = []; { let acc = 0; for (let i = list.length - 1; i >= 0; i--) { suffix[i] = acc; acc += list[i].len; } }
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       let pick = null, kind = null;
+      if (prep) {
+        const pk = Object.keys(prep).find(k => prep[k].left >= 15 && s.date < prep[k].date && (prep[k].date - s.date) / 864e5 <= 2 && lastByDay[s.d] !== k);
+        if (pk) {
+          const md = prep[pk].date;
+          s.title = 'Révision pour l’examen blanc (' + DAYS[dow(md)].toLowerCase() + ' ' + md.getDate() + ')'; s.subj = pk;
+          prep[pk].left -= s.len; revLeft[pk] = Math.max(0, (revLeft[pk] || 0) - s.len); lastByDay[s.d] = pk;
+          continue;
+        }
+      }
       if (bl && bl.items.some(x => x.left >= 15)) {
         const mustSum = Object.values(mustLeft).reduce((a, b) => a + Math.max(0, b), 0);
         const used = bl.dayUsed[s.d] || 0;
@@ -465,7 +565,7 @@ function generate(S0, weekStart, now) {
       if (kind === 'corr') {
         const need = Math.max(20, Math.min(s.len, corrLeft[pick]));
         if (need < s.len) { s.end = s.start + need; s.endT = s.startT + need * 6e4; s.len = need; }
-        s.title = 'Vérifier la série avec la correction'; s.serie = true; s.corr = true;
+        s.title = 'Vérifier la série ' + (corrFrom[pick] === null && corrPrev[pick] && wkN ? (wkN - 1) + ' ' : wkN ? wkN + ' ' : '') + 'avec la correction'; s.serie = true; s.corr = true;
         mustLeft[pick] -= s.len; corrLeft[pick] -= s.len;
       } else if (kind === 'serie') {
         const sl = mustLeft[pick] - (corrLeft[pick] || 0);
@@ -476,7 +576,7 @@ function generate(S0, weekStart, now) {
       } else {
         const pc = prevCourse(s);
         const k = cnt[pick] = (cnt[pick] || 0) + 1;
-        s.title = pc && pc.subj === pick && S.mode !== 'exam' ? 'Reprendre le cours à chaud' : labels[(k - 1) % labels.length];
+        s.title = revReason(pick, s.date) || (pc && pc.subj === pick && S.mode !== 'exam' ? 'Reprendre le cours de ' + (pc.start < 720 ? 'ce matin' : 'cet après-midi') + ' à chaud' : labels[(k - 1) % labels.length]);
         revLeft[pick] -= s.len;
       }
       s.subj = pick; lastByDay[s.d] = pick;
@@ -488,7 +588,19 @@ function generate(S0, weekStart, now) {
   const blOpen = backlogOpen(S);
   const blCap = +m.bl || 0;
   const mkBl = () => ({ cap: blCap, dayUsed: {}, items: blOpen.map(x => ({ id: x.id, title: x.title, subj: x.subj, left: x.left })) });
-  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr), blOpen.length && blCap ? mkBl() : null);
+  const mkPrep = () => {
+    const out = {};
+    for (const mk of S.mocks || []) {
+      if (!mk.date || !subjOf(S, mk.subj)) continue;
+      const md = fromIso(mk.date);
+      if (md < weekStart || md >= addDays(weekStart, 7)) continue;
+      const done = Object.values(doneMapAll).filter(v => v && v.s === mk.subj && /examen blanc/.test(v.t || '')).reduce((a, v) => a + (v.m || 0), 0);
+      out[mk.subj] = { date: md, left: Math.max(0, 100 - done) };
+    }
+    return Object.keys(out).length ? out : null;
+  };
+  const doneMapAll = S.done[key] || {};
+  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr), blOpen.length && blCap ? mkBl() : null, mkPrep());
 
   // 2. live plan: done work comes off the budgets, unfinished work moves to the blocks still ahead
   const doneMap = S.done[key] || {};
@@ -583,12 +695,13 @@ function generate(S0, weekStart, now) {
   }
   // (10% + 30 min of margin: blocks rarely line up exactly with what's left of each série)
   const mustNeed = mustNeeded ? Math.round(mustNeeded * 1.1 + 30) : 0;
-  if (mustNeed > futureCap) future.push(...extendBy(mustNeed - futureCap));
+  // in Récup, what doesn't fit simply waits (it goes to Retard at the end of the week)
+  if (mustNeed > futureCap && S.mode !== 'recup') future.push(...extendBy(mustNeed - futureCap));
   future.sort((a, b) => a.startT - b.startT);
   const blLive = blOpen.length && blCap ? mkBl() : null;
-  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft, blLive);
+  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft, blLive, mkPrep());
   const leftNow = () => Object.values(mustLeft).reduce((a, b) => a + (b >= 25 ? b : 0), 0);
-  for (let k = 0; k < 2 && leftNow() >= 25; k++) {
+  for (let k = 0; k < 2 && leftNow() >= 25 && S.mode !== 'recup'; k++) {
     // if only corrections are left, extra time only helps on/after the day they come out
     const leftK = Object.keys(mustLeft).filter(k => mustLeft[k] >= 25);
     const onlyCorr = leftK.every(k => mustLeft[k] - (corrLeft[k] || 0) < 15 && corrFrom[k]);
@@ -627,12 +740,12 @@ function generate(S0, weekStart, now) {
       for (const b of occupied().filter(b => b.end > lo && b.start < hi).sort((a, b) => a.start - b.start)) { if (b.start - t >= 30) x.ev.push(Object.assign({}, tmpl, { start: t, end: b.start })); t = Math.max(t, b.end); }
       if (hi - t >= 30) x.ev.push(Object.assign({}, tmpl, { start: t, end: hi }));
     };
-    if (x.trip) fill(x.wake + 30, x.wind, { kind: 'free', title: (x.tripEdge ? 'Voyage · ' : '') + (x.trip.title || 'Voyage'), sub: x.tripEdge ? 'pas d’étude aujourd’hui' : (x.alloc ? 'profite, juste un peu de révision le matin' : 'profite') });
-    else if (x.off) fill(x.wake + 30, x.wind, { kind: 'free', title: 'Jour off', sub: 'repos, rien à faire' });
+    if (x.trip) fill(x.wake + 35, x.wind, { kind: 'free', title: (x.tripEdge ? 'Voyage · ' : '') + (x.trip.title || 'Voyage'), sub: x.tripEdge ? 'pas d’étude aujourd’hui' : (x.alloc ? 'profite, juste un peu de révision le matin' : 'profite') });
+    else if (x.off) fill(x.wake + 35, x.wind, { kind: 'free', title: 'Jour off', sub: 'repos, rien à faire' });
     else {
       fill(x.eveStart, x.wind, FT);
-      if (x.we && x.alloc > 0) fill(x.wake + 30, x.eveStart, { kind: 'free', title: 'Libre', sub: 'le reste est à toi' });
-      if (x.we && x.alloc === 0) fill(x.wake + 30, x.eveStart, { kind: 'free', title: 'Journée off', sub: 'zéro cours, zéro série' });
+      if (x.we && x.alloc > 0) fill(x.wake + 35, x.eveStart, { kind: 'free', title: 'Libre', sub: 'le reste est à toi' });
+      if (x.we && x.alloc === 0) fill(x.wake + 35, x.eveStart, { kind: 'free', title: 'Journée off', sub: 'zéro cours, zéro série' });
     }
     // meals and trips are only markers: if a block kept from earlier sits on one, the marker gives way
     const solid = x.ev.filter(e => e.end > e.start && !['meal', 'move', 'rest', 'free'].includes(e.kind));
@@ -673,6 +786,7 @@ function buildNotifications(S, now, horizonDays) {
         const nC = evs.filter(e => e.kind === 'course').length, st = evs.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
         const first = evs.find(e => e.kind === 'course');
         const parts = [];
+        parts.push('5 min de stretching (' + STRETCH[day.d].name.toLowerCase() + ')');
         if (day.off) parts.push('jour off, profite');
         if (nC) parts.push(nC + ' cours' + (first ? ', premier à ' + fmt(first.start) : ''));
         if (st) parts.push(hm(st) + ' d’étude');
@@ -740,6 +854,6 @@ function freezePast(S, now) {
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
 
-const API = { backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

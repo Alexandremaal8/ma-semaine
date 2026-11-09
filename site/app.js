@@ -134,7 +134,7 @@ function openSheet(title, html, onSubmit) {
   $('#sheetBg').classList.add('on');
   document.body.style.overflow = 'hidden';
 }
-function closeSheet() { $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
+function closeSheet() { clearInterval(stretchTimer); $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
 $('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { beginChange(); const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
 
@@ -339,7 +339,9 @@ function hoursSheet() {
   openSheet('Horaires', `<p class="hint" style="margin:-4px 0 12px;padding:0">Les mêmes dans tous les modes.</p><div class="fields">
     ${F.time('wake', 'Réveil lun–ven', state.wake)}${F.time('sleep', 'Coucher (sauf samedi)', state.sleep)}
     ${F.time('wakeWE', 'Réveil week-end', state.wakeWE)}${F.time('sleepSat', 'Coucher samedi soir', state.sleepSat % 1440)}
-  </div>${actions(false)}`, fd => {
+    ${F.select('semw', 'Semaine du semestre en ce moment', Array.from({ length: 16 }, (_, i) => [i + 1, 'Semaine ' + (i + 1)]), L.semWeek(state, mondayOf(new Date())) || 9)}
+  </div><p class="hint" style="margin-top:10px">Sert à nommer les séries : en semaine 9, c’est la série 9.</p>${actions(false)}`, fd => {
+    if (fd.semw) state.semStart = iso(addDays(mondayOf(new Date()), -7 * (+fd.semw - 1)));
     for (const k of ['wake', 'sleep', 'wakeWE', 'sleepSat']) { let v = parseT(fd[k]); if (v == null) continue; if (k.startsWith('sleep') && v < 240) v += 1440; state[k] = v; }
     return done();
   });
@@ -488,7 +490,7 @@ function renderToday() {
     if (MINOR.has(e.kind)) { rows.push(`<div class="it k-minor"><span class="tm">${fmt(e.start)}</span><span class="minor">${esc(e.title)}</span></div>`); continue; }
     const su = e.subj ? subjOf(state, e.subj) : null;
     const isDone = e.kind === 'study' ? e.state === 'done' : !!sm.done[e.id];
-    const can = e.kind === 'study' || e.kind === 'sport';
+    const can = e.kind === 'study' || e.kind === 'sport' || e.kind === 'stretch';
     const cls = ['it', 'k-' + e.kind];
     if (isToday && e.start <= mins && mins < e.end) cls.push('now');
     if (e.state === 'missed') cls.push('missed');
@@ -496,7 +498,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}</div>` : ''}</div>
+      <div class="card"><div class="bd"${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -537,6 +539,46 @@ function renderCal() {
     <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour ajouter quelque chose.</div>'}</div>`;
 }
 
+/* ---------- Stretching ---------- */
+let stretchTimer = null;
+function stretchSheet(d, wk, id) {
+  const r = L.STRETCH[d];
+  openSheet('Stretching · ' + r.name, `<p class="hint" style="margin:-4px 0 12px;padding:0">5 exercices, 1 min chacun. Doucement, sans forcer ni faire de à-coups : tu dois sentir un étirement, jamais une douleur. Respire lentement.</p>
+    <div class="group" id="stList">${r.moves.map((mv, i) => `<div class="st-row" data-i="${i}"><span class="st-n">${i + 1}</span><span class="bd"><span class="ti">${esc(mv[0])}${mv[3] ? ' <em class="tag cu">2 côtés</em>' : ''}</span><span class="su">${esc(mv[1])}</span></span><span class="st-t num" id="stT${i}">1:00</span></div>`).join('')}</div>
+    <div class="st-now" id="stNow" hidden></div>
+    <div class="sh-actions"><button type="button" class="btn pri" data-act="stretchGo" data-v="${d}" data-w="${wk}" data-id="${id}" id="stGo">Démarrer le minuteur</button></div>`);
+}
+function stretchRun(d, wk, id) {
+  const r = L.STRETCH[d]; let i = 0, t = r.moves[0][2];
+  const go = $('#stGo'), now = $('#stNow');
+  clearInterval(stretchTimer);
+  go.textContent = 'Arrêter'; go.dataset.act = 'stretchStop';
+  const paint = () => {
+    document.querySelectorAll('.st-row').forEach((el, k) => { el.classList.toggle('on', k === i); el.classList.toggle('ok', k < i); });
+    const mv = r.moves[i], el = $('#stT' + i); if (el) el.textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+    now.hidden = false;
+    now.innerHTML = `<b>${esc(mv[0])}</b><span>${mv[3] && t <= mv[2] / 2 ? 'Change de côté' : mv[3] ? 'Premier côté' : 'Tiens la position, respire'}</span>`;
+  };
+  paint();
+  stretchTimer = setInterval(() => {
+    if (!$('#stNow')) { clearInterval(stretchTimer); return; }
+    t--;
+    if (t <= 0) {
+      i++;
+      if (i >= r.moves.length) {
+        clearInterval(stretchTimer);
+        const dm = state.done[wk] = state.done[wk] || {}; dm[id] = { k: 'stretch', m: 5 }; save();
+        now.innerHTML = '<b>Bravo, c’est fait</b><span>Le stretching du jour est coché.</span>';
+        document.querySelectorAll('.st-row').forEach(el => el.classList.add('ok'));
+        go.textContent = 'Fermer'; go.dataset.act = 'closeSheet';
+        renderToday(); return;
+      }
+      t = r.moves[i][2];
+    }
+    paint();
+  }, 1000);
+}
+
 /* ---------- Retard ---------- */
 const BL_TIMES = [[30, '30 min'], [60, '1h'], [90, '1h30'], [120, '2h'], [180, '3h'], [240, '4h'], [300, '5h']];
 function editBacklog(id) {
@@ -544,7 +586,7 @@ function editBacklog(id) {
   const cr = x.id ? L.backlogCredit(state, x.id) : 0;
   openSheet(x.id ? 'Modifier le retard' : 'Ajouter un retard', `<div class="fields">
     ${F.select('subj', 'Matière', subjOpts(), x.subj)}
-    ${F.text('title', 'Quoi', x.title, 'full', 'ex. Série 6, cours 8 à relire…')}
+    ${F.text('title', 'Quoi, précisément', x.title, 'full', 'ex. Série 6 · Cours 8 à relire · Exos 3 à 5 de la série 7')}
     ${F.select('minutes', 'Temps qu’il te faut' + (cr ? ' (en tout, ' + hm(cr) + ' déjà fait)' : ''), BL_TIMES.concat([[x.minutes, hm(x.minutes)]]).filter((v, i, a) => a.findIndex(w => w[0] === v[0]) === i).sort((a, b) => a[0] - b[0]), x.minutes)}
   </div>
   <div class="group" style="margin-top:12px"><label class="row-sw"><span class="bd"><span class="ti">Urgent</span><span class="su">Passe avant les autres retards</span></span><input type="checkbox" class="sw" name="urgent" ${x.urgent ? 'checked' : ''}></label></div>
@@ -568,18 +610,23 @@ function renderBacklog() {
       <div class="bar"><i style="width:${total ? Math.min(100, M.blPlaced / total * 100) : 0}%"></i></div></div>`;
   }
   const week = M.lateMin >= 15 ? `<div class="notice"><span><b>Cette semaine : ${hm(M.lateMin)} pas faits</b>, déjà replacés dans ta semaine. Ce qui ne sera pas fait dimanche soir arrivera ici.</span></div>` : '';
-  const rows = open.map(x => {
+  const manual = state.blOrder === 'manual';
+  const rows = open.map((x, idx) => {
     const su = subjOf(state, x.subj), nx = M.blNext[x.id];
     const info = x.left < 15 ? '<b style="color:var(--acc)">Temps prévu fait · coche si c’est fini</b>' : `${hm(x.left)} restant${x.credit ? ' · ' + hm(x.credit) + ' déjà fait' : ''} · ${nx ? 'prochain bloc ' + fmtNext(nx) : 'pas encore placé'}`;
     return `<div class="bl-row" style="--c:${esc(su ? su.color : '')}">
       <button type="button" class="chk" data-act="blDone" data-v="${esc(x.id)}" aria-pressed="false" aria-label="Fini : ${esc(x.title)}">${CHECK}</button>
-      <button type="button" class="bd" data-act="editBacklog" data-v="${esc(x.id)}"><span class="ti">${esc(x.title)}${x.urgent ? '<span class="tag">urgent</span>' : ''}${x.auto ? '<span class="tag cu">auto</span>' : ''}</span><span class="su">${esc(su ? su.name : '')} · ${info}</span></button>
+      <span class="rk num">${idx + 1}</span>
+      <button type="button" class="bd" data-act="editBacklog" data-v="${esc(x.id)}"><span class="ti">${esc(x.title)}${x.urgent ? '<span class="tag">urgent</span>' : ''}${x.auto ? '<span class="tag cu">auto</span>' : ''}</span><span class="su">${esc(su ? su.name : '')} · ${info}</span>${!manual && x.why ? `<span class="why">Priorité : ${esc(x.why)}</span>` : ''}</button>
+      ${manual ? `<span class="arrows"><button type="button" data-act="blUp" data-v="${esc(x.id)}" aria-label="Monter" ${idx === 0 ? 'disabled' : ''}>▲</button><button type="button" data-act="blDown" data-v="${esc(x.id)}" aria-label="Descendre" ${idx === open.length - 1 ? 'disabled' : ''}>▼</button></span>` : ''}
       ${x.left < 15 ? `<button type="button" class="more" data-act="blMore" data-v="${esc(x.id)}">+30 min</button>` : ''}
     </div>`;
   }).join('');
   const recent = (state.backlog || []).filter(x => x.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 6);
   $('#blBody').innerHTML = `${summary}${week}
-    <div class="sec-t">${open.length ? 'À faire' : ''}<button type="button" data-act="editBacklog">+ Ajouter un retard</button></div>
+    <div class="sec-t">${open.length ? 'À faire, dans l’ordre' : ''}<button type="button" data-act="editBacklog">+ Ajouter un retard</button></div>
+    ${open.length > 1 ? `<div class="seg" style="margin:0 0 10px"><label><input type="radio" name="blOrder" value="auto" ${manual ? '' : 'checked'}><span>Ordre automatique</span></label><label><input type="radio" name="blOrder" value="manual" ${manual ? 'checked' : ''}><span>Mon ordre</span></label></div>
+    <p class="hint" style="margin:-2px 4px 10px">${manual ? 'Utilise les flèches. Le n°1 est rattrapé en premier.' : 'L’app classe selon : urgent, examen ou examen blanc proche, séries avant cours, puis le plus ancien.'}</p>` : ''}
     ${open.length ? `<div class="group">${rows}</div><p class="hint" style="margin-top:8px">Les blocs « Retard » apparaissent dans ta journée. Coche ici quand c’est vraiment fini : tant que c’est pas coché, l’app continue de prévoir du temps.</p>` : '<div class="group"><div class="empty">Ajoute ce que t’as en retard (série, cours à relire…) avec le temps qu’il te faut. L’app le répartit dans tes semaines sans faire passer tes séries en retard.</div></div>'}
     ${recent.length ? `<div class="sec-t">Fini récemment</div><div class="group">${recent.map(x => `<div class="bl-row done" style="--c:${esc((subjOf(state, x.subj) || {}).color || '')}"><button type="button" class="chk" data-act="blUndo" data-v="${esc(x.id)}" aria-pressed="true" aria-label="Remettre : ${esc(x.title)}">${CHECK}</button><span class="bd"><span class="ti">${esc(x.title)}</span><span class="su">${esc((subjOf(state, x.subj) || {}).name || '')}</span></span></div>`).join('')}</div>` : ''}`;
   const badge = $('#blBadge'); if (badge) { badge.textContent = total >= 15 ? hm(total) : ''; badge.hidden = total < 15; }
@@ -597,7 +644,9 @@ function rollover() {
     const M = L.generate(state, ws, end).meta;
     for (const [subj, u] of Object.entries(M.unfinished || {})) {
       const su = subjOf(state, subj); if (!su) continue;
-      const it = { id: uid(), subj, title: (u.left - u.corr >= 15 ? 'Série' : 'Correction de la série') + (u.left - u.corr >= 15 && u.corr >= 15 ? ' + correction' : '') + ' du ' + dateLbl(ws), minutes: u.left, created: end.getTime(), auto: true };
+      const n = L.semWeek(state, ws);
+      const what = n ? 'série ' + n : 'série du ' + dateLbl(ws);
+      const it = { id: uid(), subj, title: u.left - u.corr >= 15 ? (n ? 'Série ' + n : 'Série du ' + dateLbl(ws)) + (u.corr >= 15 ? ' + correction' : '') : 'Vérifier la ' + what + ' avec la correction', minutes: u.left, created: end.getTime(), auto: true };
       state.backlog.push(it); added.push(it);
     }
   }
@@ -781,6 +830,17 @@ document.addEventListener('click', async e => {
     case 'modeSheet': modeSheet(b.dataset.w); return;
     case 'baseModeSheet': baseModeSheet(); return;
     case 'editBacklog': editBacklog(v); return;
+    case 'stretchSheet': stretchSheet(+v, b.dataset.w, b.dataset.id); return;
+    case 'stretchGo': stretchRun(+v, b.dataset.w, b.dataset.id); return;
+    case 'stretchStop': clearInterval(stretchTimer); b.textContent = 'Démarrer le minuteur'; b.dataset.act = 'stretchGo'; return;
+    case 'blUp': case 'blDown': {
+      beginChange();
+      const order = L.backlogOpen(state).map(x => x.id), i = order.indexOf(v), j = a === 'blUp' ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+      order.forEach((id, k) => { const it = state.backlog.find(e => e.id === id); if (it) it.rank = k; });
+      done(); return;
+    }
     case 'blDone': { beginChange(); const x = state.backlog.find(e => e.id === v); if (x) { x.done = true; x.doneAt = Date.now(); } b.classList.add('pop'); b.setAttribute('aria-pressed', 'true'); setTimeout(() => { save(); renderAll(); endChange('Retard fini', x ? x.title : ''); }, 380); return; }
     case 'blUndo': { beginChange(); const x = state.backlog.find(e => e.id === v); if (x) { x.done = false; delete x.doneAt; } done(); return; }
     case 'blMore': { beginChange(); const x = state.backlog.find(e => e.id === v); if (x) x.minutes = L.backlogCredit(state, x.id) + 30; done(); return; }
@@ -828,6 +888,11 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.courses) beginChange();
+  if (t.name === 'blOrder') {
+    beginChange();
+    if (t.value === 'manual') L.backlogOpen(state).forEach((x, k) => { const it = state.backlog.find(e => e.id === x.id); if (it) it.rank = k; });
+    state.blOrder = t.value; done(); return;
+  }
   if (t.dataset.auto) { beginChange(); state.autoMode = t.checked; if (!t.checked) state.autoModes = {}; done(); return; }
   if (t.dataset.courses) {
     const wk = t.dataset.courses; state.noCourseWeeks = state.noCourseWeeks.filter(x => x !== wk);
@@ -840,7 +905,7 @@ document.addEventListener('change', e => {
 
 
 /* ---------- bubble touch effect ---------- */
-const BUB_SEL = '.bl-row .bd,.bl-row .more,.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
+const BUB_SEL = '.arrows button,.bl-row .bd,.bl-row .more,.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
 document.addEventListener('pointerdown', e => {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const el = e.target.closest(BUB_SEL); if (!el) return;
