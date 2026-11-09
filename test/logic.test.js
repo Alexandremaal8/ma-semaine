@@ -80,3 +80,9 @@ console.log(bad?'FAIL '+bad:'OK');
  S.mode='normal';S.backlog.push({id:'b3',subj:'alg',title:'Gros retard',minutes:240,created:3});console.log('auto avec gros retard:',L.weekCfg(S,ws).mode,'·',L.weekCfg(S,ws).why);
  const r=L.generate(S,ws,now);console.log('en rattrapage: retard placé',L.hm(r.meta.blPlaced),'sur',L.hm(r.meta.blTotal),'| séries pas casées',r.meta.mustLeftAfter);}
 console.log(bad?'FAIL '+bad:'OK');
+// 13. checking the Monday physics prep must not show it twice
+{const S=L.defaultState();S.since=0;const now=new Date(2026,10,9,16,40),ws=L.mondayOf(now);let d=L.generate(S,ws,now);const pr=d[0].ev.find(e=>e.fixed);
+ S.done[L.iso(ws)]={[pr.id]:{s:pr.subj,t:pr.title,m:pr.end-pr.start,d:0,a:pr.start,fx:true}};d=L.generate(S,ws,now);
+ const n=d[0].ev.filter(e=>/Revoir le cours/.test(e.title)).length;console.log('prépa physique affichée',n,'fois');if(n!==1)fail('fixed block duplicated');
+ for(const x of d){const b=x.ev.filter(e=>e.end>e.start).sort((a,b)=>a.start-b.start);for(let i=1;i<b.length;i++)if(b[i].start<b[i-1].end)fail('overlap',x.d,b[i-1].title,b[i].title)}}
+console.log(bad?'FAIL '+bad:'OK');

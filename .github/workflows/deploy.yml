@@ -28,7 +28,9 @@ jobs:
           node-version: 20
 
       - name: Vérifier la logique du planning
-        run: node test/logic.test.js | tail -1 | grep -q OK
+        run: |
+          node test/logic.test.js | tail -1 | grep -q OK
+          node test/fuzz.test.js | tail -1 | grep -q OK
 
       - name: Préparer Cloudflare (compte, sous-domaine, stockage)
         id: cf

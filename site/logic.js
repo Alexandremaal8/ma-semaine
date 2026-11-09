@@ -202,12 +202,14 @@ function layoutDay(S, m, weekStart, d) {
   const off = (S.offDays || []).includes(dIso);
   const dayMocks = (S.mocks || []).filter(x => x.date === dIso && x.end > x.start);
   let courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start).map(c => Object.assign({}, c)) : [];
-  for (const mk of dayMocks) {
+  // a mock exam or one of your events during a course takes the place of that part of the course
+  const dayEvents = (S.events || []).filter(x => x.date === dIso && x.end > x.start);
+  for (const mk of dayMocks.concat(dayEvents)) {
     courses = courses.flatMap(c => {
       if (mk.end <= c.start || mk.start >= c.end) return [c];
       const parts = [];
       if (mk.start - c.start >= 15) parts.push(Object.assign({}, c, { end: mk.start }));
-      if (c.end - mk.end >= 15) parts.push(Object.assign({}, c, { id: c.id + '-b', start: mk.end, afterMock: true }));
+      if (c.end - mk.end >= 15) parts.push(Object.assign({}, c, { id: c.id + '-b', start: mk.end, afterMock: dayMocks.includes(mk) }));
       return parts;
     });
   }
@@ -233,9 +235,9 @@ function layoutDay(S, m, weekStart, d) {
   if (courses.length) {
     if (free(firstC - COMMUTE - 5, firstC - 5)) ev.push({ kind: 'move', start: firstC - COMMUTE - 5, end: firstC - 5, title: 'Maison → EPFL' });
     let ret = S.mode === 'charbon' ? Math.max(lastC, 1110) : lastC;
-    for (let k = 0; k < 8 && !free(ret, ret + COMMUTE); k++) ret += 15;
+    for (let k = 0; k < 40 && !free(ret, ret + COMMUTE); k++) ret += 15;
     goHome = ret;
-    ev.push({ kind: 'move', start: ret, end: ret + COMMUTE, title: 'EPFL → maison' });
+    if (free(ret, ret + COMMUTE)) ev.push({ kind: 'move', start: ret, end: ret + COMMUTE, title: 'EPFL → maison' });
   }
   for (const s of [720, 735, 705, 750, 780, 795, 690]) if (free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: courses.some(c => c.start < s + 120 && c.end > s - 60) ? 'Midi à l’EPFL' : 'Midi' }); break; }
   const wind = sleep - 30;
@@ -536,11 +538,16 @@ function generate(S0, weekStart, now) {
     } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
   });
   // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were
+  // (fixed blocks like the Monday physics prep are already in the day: never show them twice)
   const slotIds = new Set(slots.concat(frozen).map(s => idOf(s.d, s)));
+  for (const x of days) for (const e of x.ev) if (e.fixed) slotIds.add(e.id);
   for (const [id, rec] of Object.entries(doneMap)) {
-    if (slotIds.has(id) || !rec || typeof rec !== 'object' || rec.d == null || rec.a == null) continue;
+    if (slotIds.has(id) || !rec || typeof rec !== 'object' || rec.fx || rec.d == null || rec.a == null || !rec.m) continue;
     const x = days[rec.d]; if (!x) continue;
-    live.push({ d: rec.d, date: x.date, start: rec.a, end: rec.a + rec.m, len: rec.m, id, title: rec.t, subj: rec.s, state: 'done', catchup: !rec.b, bl: rec.b, late: !!rec.b });
+    const it = { d: rec.d, date: x.date, start: rec.a, end: rec.a + rec.m, len: rec.m, id, title: rec.t, subj: rec.s, state: 'done', bl: rec.b, late: !!rec.b };
+    // a block done early whose slot later moved: its time is used, so a block still to do on top of it goes away
+    for (let i = live.length - 1; i >= 0; i--) { const o = live[i]; if (o.d === it.d && o.state === 'todo' && o.start < it.end && o.end > it.start) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); } }
+    live.push(it);
   }
   const unfinished = {}; for (const k of Object.keys(mustLeft)) if (mustLeft[k] >= 20) unfinished[k] = { left: Math.round(mustLeft[k]), corr: Math.round(corrLeft[k] || 0) };
   const mustNeeded = Object.values(mustLeft).reduce((a, b) => a + b, 0);
@@ -605,6 +612,8 @@ function generate(S0, weekStart, now) {
 
   for (const s of live) {
     const x = days[s.d];
+    // a block shortened during planning may already be over
+    if (s.state === 'todo' && x.date.getTime() + s.end * 6e4 <= nowT) s.state = x.date.getTime() + s.end * 6e4 <= sinceT ? 'pre' : 'missed';
     if (s.kind2 === 'ahead') { x.ev.push({ kind: 'free', start: s.start, end: s.end, title: 'Libre', sub: 'T’es en avance', id: s.id }); continue; }
     const su = s.subj ? subjOf(S, s.subj) : null;
     x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len });
@@ -625,8 +634,11 @@ function generate(S0, weekStart, now) {
       if (x.we && x.alloc > 0) fill(x.wake + 30, x.eveStart, { kind: 'free', title: 'Libre', sub: 'le reste est à toi' });
       if (x.we && x.alloc === 0) fill(x.wake + 30, x.eveStart, { kind: 'free', title: 'Journée off', sub: 'zéro cours, zéro série' });
     }
+    // meals and trips are only markers: if a block kept from earlier sits on one, the marker gives way
+    const solid = x.ev.filter(e => e.end > e.start && !['meal', 'move', 'rest', 'free'].includes(e.kind));
+    x.ev = x.ev.filter(e => !['meal', 'move'].includes(e.kind) || !solid.some(o => o.start < e.end && o.end > e.start));
     x.ev.sort((a, b) => a.start - b.start);
-    x.ev.forEach(e => { if (!e.id) e.id = x.d + '-' + e.start + '-' + e.kind; });
+    x.ev.forEach(e => { if (!e.id) e.id = x.d + '-' + e.start + '-' + e.kind + (e.eid ? '-' + e.eid : ''); });
     x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
     x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);
   }
