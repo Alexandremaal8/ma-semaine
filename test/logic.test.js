@@ -36,3 +36,16 @@ for(const mode of L.MODE_ORDER){const S=L.defaultState();S.mode=mode;S.since=0;c
 {const old={v:2,mode:'charbon',subjects:[{id:'ana',name:'Analyse I',color:'#C2410C',prio:3,exam:''}],routines:[{id:'r',day:5,start:570,end:660,title:'Courses'}],done:{'2026-11-09':{'0-480-study':1}}};
  const S=L.normalize(old);console.log('migration:',S.v,S.wake,S.sleep,S.routines.map(r=>r.kind).join(','),S.subjects[0].serie);check(S,new Date(2026,10,10,12,0),'migr');}
 console.log(bad?'FAIL '+bad:'OK');
+// 8. trip to Lebanon + modes per week + mock exam
+{const S=L.defaultState();S.since=0;S.trips=[{id:'t',title:'Liban',from:'2026-12-20',to:'2027-01-02',light:60}];
+ S.subjects[0].exam='2027-01-25';S.mocks=[{id:'m',subj:'alg',date:'2026-11-18',start:615,end:720}];
+ const rec=L.recommendMode(S,new Date(2026,10,30));console.log('reco 30 nov:',rec&&rec.mode,'|',rec&&rec.why);
+ const rec2=L.recommendMode(S,new Date(2027,0,4));console.log('reco 4 janv:',rec2&&rec2.mode);
+ if(!rec||rec.mode!=='avance')fail('reco before trip'); if(!rec2||rec2.mode!=='exam')fail('reco after trip');
+ for(const ws of [new Date(2026,11,14),new Date(2026,11,21),new Date(2026,11,28)]){const d=L.generate(S,ws,new Date(2026,11,1));
+   console.log('semaine',L.iso(ws),'cours:',d.meta.cfg.coursesOn,'| étude par jour',d.map(x=>L.hm(x.plan)).join(' '));}
+ const d20=L.generate(S,new Date(2026,11,14),new Date(2026,11,1))[6]; if(d20.plan)fail('study on departure day');
+ S.weekModes['2026-11-16']='charbon';const w=L.generate(S,new Date(2026,10,16),new Date(2026,10,9));console.log('mode semaine 16 nov:',w.meta.cfg.mode,'| mardi 17 avant exam blanc:',w[1].ev.filter(e=>e.kind==='study').map(e=>(L.subjOf(S,e.subj)||{}).name).join(', '));
+ const me=w[2].ev.find(e=>e.title.startsWith('Examen blanc'));console.log('mercredi 18:',me&&me.title,L.fmt(me.start));
+ S.noCourseWeeks=['2026-11-16'];const nc=L.generate(S,new Date(2026,10,16),new Date(2026,10,9));console.log('semaine sans cours:',nc.meta.cfg.coursesOn,'cours',nc.flatMap(x=>x.ev).filter(e=>e.kind==='course').length,'étude',L.hm(nc.reduce((a,x)=>a+x.plan,0)));}
+console.log(bad?'FAIL '+bad:'OK');

@@ -5,7 +5,9 @@ const L = self.Semaine;
 const { DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, clone, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, subjOf } = L;
 const WORKER = (self.WORKER_URL || '').replace(/\/$/, '');
 const LS = 'ma-semaine-epfl-v2';
-const MODE_COLORS = { chill: '#1C76A6', normal: '#2E7A55', charbon: '#E2510E', rattrapage: '#B7791F', exam: '#C8102E', recup: '#6A58B3' };
+const MODE_COLORS = { chill: '#1C76A6', normal: '#2E7A55', charbon: '#E2510E', avance: '#0F766E', rattrapage: '#B7791F', exam: '#C8102E', recup: '#6A58B3' };
+const wkOf = di => iso(mondayOf(fromIso(di)));
+const cfgOf = wk => L.weekCfg(state, fromIso(wk));
 const SUBJ_COLORS = ['#C2410C', '#1D4ED8', '#047857', '#7C3AED', '#0E7490', '#BE185D', '#A16207', '#475569'];
 const MINOR = new Set(['meal', 'move', 'rest']);
 
@@ -46,7 +48,7 @@ const post = (path, body) => fetch(WORKER + path, { method: 'POST', headers: { '
 async function syncAll() {
   if (!WORKER) return;
   try {
-    if (state.widgetToken) await post('/agenda', { token: state.widgetToken, mode: MODE_META[state.mode].name, agenda: L.buildAgenda(state, new Date(), 3) });
+    if (state.widgetToken) await post('/agenda', { token: state.widgetToken, mode: MODE_META[cfgOf(iso(mondayOf(new Date()))).mode].name, agenda: L.buildAgenda(state, new Date(), 3) });
   } catch (e) { console.warn('agenda', e); }
   if (!state.notif.on) return;
   try {
@@ -203,21 +205,62 @@ function editExam(subjId, date) {
 }
 function addSheet() {
   const isOff = state.offDays.includes(calSel);
+  const O = (act, color, title, sub) => `<button type="button" class="mopt" data-act="${act}" data-v="${calSel}" style="--m:${color}"><span class="sw8"></span><span><b>${title}</b><small>${sub}</small></span></button>`;
   openSheet('Ajouter le ' + dateLbl(fromIso(calSel)), `<div class="modes">
-    <button type="button" class="mopt" data-act="newEvent" style="--m:var(--acc)"><span class="sw8"></span><span><b>Un événement</b><small>Soirée, rendez-vous, match… Les révisions de ce créneau sont replacées ailleurs dans la semaine.</small></span></button>
-    <button type="button" class="mopt" data-act="offDay" data-v="${calSel}" style="--m:var(--faint)"><span class="sw8"></span><span><b>${isOff ? 'Annuler le jour off' : 'Un jour off'}</b><small>Aucune étude ce jour-là. Le travail est réparti sur les autres jours.</small></span></button>
-    <button type="button" class="mopt" data-act="newExam" style="--m:var(--exam)"><span class="sw8"></span><span><b>Un examen</b><small>La matière passe en priorité quand l’examen approche.</small></span></button>
+    ${O('newEvent', 'var(--acc)', 'Un événement', 'Soirée, rendez-vous, match… Les révisions de ce créneau sont replacées ailleurs.')}
+    ${O('newMock', '#DB2777', 'Un examen blanc', 'Facultatif, mais la matière passe en priorité les jours d’avant.')}
+    ${O('offDay', 'var(--faint)', isOff ? 'Annuler le jour off' : 'Un jour off', 'Aucune étude ce jour-là, le travail va sur les autres jours.')}
+    ${O('newTrip', '#0F766E', 'Un voyage', 'Pas d’étude les jours de départ et retour, très peu pendant. L’app t’aide à partir avec de l’avance.')}
+    ${O('newExam', 'var(--exam)', 'Un examen', 'La matière passe en priorité quand l’examen approche.')}
   </div>`);
 }
-function modeSheet() {
-  openSheet('Mode de la semaine', `<div class="modes" role="radiogroup">${MODE_ORDER.map(k => `<button type="button" class="mopt" role="radio" aria-checked="${k === state.mode}" data-act="setMode" data-v="${k}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}</b><small>${esc(MODE_META[k].tag)}</small></span></button>`).join('')}</div>
-    <button type="button" class="linkbtn" data-act="tuneMode">Ajuster le mode ${esc(MODE_META[state.mode].name)}</button>`);
+function editMock(id, date) {
+  const x = (state.mocks || []).find(e => e.id === id) || { id: null, subj: (state.subjects[0] || {}).id, date: date || calSel, start: 495, end: 600, place: '' };
+  openSheet(x.id ? 'Examen blanc' : 'Nouvel examen blanc', `<div class="fields">
+    ${F.select('subj', 'Matière', subjOpts(), x.subj)}
+    ${F.date('date', 'Jour', x.date)}
+    ${F.time('start', 'Début', x.start)}${F.time('end', 'Fin', x.end)}
+    ${F.text('place', 'Où (facultatif)', x.place)}
+  </div><p class="hint" style="margin-top:10px">Facultatif, mais t’as envie d’être prêt : la matière reçoit plus de révisions dans les jours d’avant, et tu as un rappel la veille.</p>${actions(!!x.id)}`, (fd, btn) => {
+    if (isDel(btn)) { state.mocks = state.mocks.filter(e => e.id !== x.id); return done(); }
+    const t = timesOk(fd); if (!t) return false;
+    if (!fd.date) { toast('Choisis un jour'); return false; }
+    const obj = { id: x.id || uid(), subj: fd.subj, date: fd.date, start: t[0], end: t[1], place: fd.place.trim() };
+    if (x.id) Object.assign(x, obj); else state.mocks.push(obj);
+    calSel = obj.date; return done();
+  });
 }
-function tuneMode() {
-  const m = state.modes[state.mode];
+function editTrip(id, date) {
+  const x = (state.trips || []).find(e => e.id === id) || { id: null, title: '', from: date || calSel, to: iso(addDays(fromIso(date || calSel), 7)), light: 60 };
+  openSheet(x.id ? x.title || 'Voyage' : 'Nouveau voyage', `<div class="fields">
+    ${F.text('title', 'Où', x.title, 'full', 'ex. Liban')}
+    ${F.date('from', 'Départ', x.from, '')}${F.date('to', 'Retour', x.to, '')}
+    ${F.seg('light', 'Étude par jour sur place', [[0, 'Rien'], [30, '30 min'], [60, '1h'], [90, '1h30']], x.light)}
+  </div>
+  <div class="rec" style="margin-top:14px"><b>Comment l’app s’organise :</b><br>• les 3 semaines avant le départ, elle te conseille le mode <b>Avance</b> pour partir en ayant révisé ;<br>• le jour du départ et du retour : aucune étude ;<br>• sur place : juste le temps choisi, le matin ;<br>• au retour, s’il y a des examens dans les 8 semaines : mode <b>Exam</b> conseillé.</div>
+  ${actions(!!x.id)}`, (fd, btn) => {
+    if (isDel(btn)) { state.trips = state.trips.filter(e => e.id !== x.id); return done(); }
+    if (!fd.from || !fd.to || fd.to < fd.from) { toast('Le retour doit être après le départ'); return false; }
+    const obj = { id: x.id || uid(), title: fd.title.trim() || 'Voyage', from: fd.from, to: fd.to, light: +fd.light || 0 };
+    if (x.id) Object.assign(x, obj); else state.trips.push(obj);
+    calSel = obj.from; toast('Voyage ajouté. Ajoute tes dates d’examen pour que l’app prépare le retour.'); return done();
+  });
+}
+function modeSheet(wk) {
+  wk = wk || wkOf(selDate);
+  const cfg = cfgOf(wk), rec = L.recommendMode(state, fromIso(wk));
+  openSheet('Semaine du ' + dateLbl(fromIso(wk)), `
+    ${rec ? `<div class="rec"><b>Conseil : mode ${MODE_META[rec.mode].name}.</b> ${esc(rec.why)}</div>` : ''}
+    <div class="group" style="margin-bottom:12px"><label class="row-sw"><span class="bd"><span class="ti">J’ai cours cette semaine</span><span class="su">Sinon : semaine de travail sans cours, ni séries</span></span><input type="checkbox" class="sw" data-courses="${wk}" ${cfg.coursesOn ? 'checked' : ''}${cfg.tripDays >= 3 ? ' disabled' : ''}></label></div>
+    <div class="modes" role="radiogroup">${MODE_ORDER.map(k => `<button type="button" class="mopt" role="radio" aria-checked="${k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}${rec && rec.mode === k ? ' <em class="badge">conseillé</em>' : ''}</b><small>${esc(MODE_META[k].tag)}</small></span></button>`).join('')}</div>
+    <button type="button" class="linkbtn" data-act="tuneMode" data-v="${cfg.mode}">Ajuster le mode ${esc(MODE_META[cfg.mode].name)}</button>`);
+}
+function tuneMode(mk) {
+  mk = MODE_ORDER.includes(mk) ? mk : cfgOf(wkOf(selDate)).mode;
+  const m = state.modes[mk];
   const share = [[0, 'Off'], [0.5, 'Léger'], [1, 'Normal']];
   const near = v => share.reduce((a, b) => Math.abs(b[0] - v) < Math.abs(a[0] - v) ? b : a)[0];
-  openSheet('Mode ' + MODE_META[state.mode].name, `<p class="hint" style="margin:-4px 0 12px;padding:0">Tu choisis le total de la semaine, l’app le répartit toute seule selon le temps libre de chaque jour. Les séries passent toujours en premier.</p><div class="fields">
+  openSheet('Mode ' + MODE_META[mk].name, `<p class="hint" style="margin:-4px 0 12px;padding:0">Tu choisis le total de la semaine, l’app le répartit toute seule selon le temps libre de chaque jour. Les séries passent toujours en premier.</p><div class="fields">
     ${F.select('week', 'Étude par semaine (en plus des cours)', [240, 360, 480, 600, 720, 900, 1080, 1200, 1440, 1680, 1920, 2100, 2400].map(v => [v, hm(v)]), m.week)}
     ${F.seg('sat', 'Samedi', share, near(m.sat), '')}${F.seg('sun', 'Dimanche', share, near(m.sun), '')}
   </div>
@@ -228,7 +271,7 @@ function tuneMode() {
     ${F.select('ext', 'Rattrapage max par soir', [0, 30, 45, 60, 75, 90].map(v => [v, v ? v + ' min' : 'Jamais']), m.ext, '')}
   </div></details>
   <div class="sh-actions"><button type="submit" class="btn" value="reset">Par défaut</button><button type="submit" class="btn pri" value="save">Enregistrer</button></div>`, (fd, btn) => {
-    if (btn && btn.value === 'reset') { state.modes[state.mode] = clone(MODE_DEFAULTS[state.mode]); toast('Mode remis par défaut'); return done(); }
+    if (btn && btn.value === 'reset') { state.modes[mk] = clone(MODE_DEFAULTS[mk]); toast('Mode remis par défaut'); return done(); }
     for (const k of ['week', 'sat', 'sun', 'block', 'pause', 'freeEve', 'ext']) if (fd[k] != null && fd[k] !== '') m[k] = +fd[k];
     return done();
   });
@@ -253,8 +296,8 @@ function weekSheet() {
   if (M.unplaced >= 30) alerts.push('Pas assez de temps libre pour tout : ' + hm(M.unplaced) + ' d’étude ne rentrent pas.');
   if (M.sportMin < L.SPORT_MIN || M.sportMin > L.SPORT_MAX) alerts.push('Sport : ' + hm(M.sportMin) + ' par semaine. Il en faut entre 2h et 3h (Ma semaine → Routines).');
   if (sm.sleepAvg < 450) alerts.push('Moins de 7h30 de sommeil par nuit en moyenne.');
-  if (state.mode === 'exam' && !state.subjects.some(s => s.exam)) alerts.push('Ajoute tes dates d’examen (Calendrier → +) pour que le mode Exam sache quoi prioriser.');
-  if (state.mode === 'exam' && state.coursesOn) alerts.push('Pendant la session, coupe « J’ai cours » dans Ma semaine pour libérer les journées.');
+  if (M.cfg.mode === 'exam' && !state.subjects.some(s => s.exam)) alerts.push('Ajoute tes dates d’examen (Calendrier → +) pour que le mode Exam sache quoi prioriser.');
+  if (M.cfg.mode === 'exam' && M.cfg.coursesOn) alerts.push('Pendant la session, coupe « J’ai cours cette semaine » (touche le mode en haut à droite).');
   openSheet('Semaine du ' + dateLbl(ws), `<div class="stats">
       <div class="stat"><div class="k">Étude faite</div><div class="v">${pct}%</div><div class="hint" style="padding:0">${hm(sm.dn)} sur ${hm(sm.plan)}</div></div>
       <div class="stat${M.lateMin ? ' warn' : ''}"><div class="k">Pas fait (replacé)</div><div class="v">${hm(M.lateMin)}</div></div>
@@ -269,9 +312,10 @@ function done() { save(); renderAll(); return true; }
 
 /* ---------- Aujourd'hui ---------- */
 function renderToday() {
-  document.body.dataset.mode = state.mode;
   const sel = fromIso(selDate), ws = mondayOf(sel), key = iso(ws);
   const days = L.generate(state, ws), sm = L.summarize(state, days, key);
+  const wmode = days.meta.cfg.mode;
+  document.body.dataset.mode = wmode;
   const day = days[dow(sel)];
   const isToday = selDate === todayIso();
   const now = new Date(), mins = now.getHours() * 60 + now.getMinutes();
@@ -279,7 +323,7 @@ function renderToday() {
   const we = addDays(ws, 6);
   $('#tEyebrow').textContent = isToday ? 'Aujourd’hui' : (Math.abs(sel - fromIso(todayIso())) === 864e5 ? (sel > fromIso(todayIso()) ? 'Demain' : 'Hier') : 'Semaine du ' + ws.getDate() + (ws.getMonth() !== we.getMonth() ? ' ' + MONTHS[ws.getMonth()] : '') + ' au ' + dateLbl(we));
   $('#tTitle').textContent = DAYS[dow(sel)] + ' ' + sel.getDate() + ' ' + MONTHS[sel.getMonth()];
-  $('#modePill').innerHTML = `<span class="dot"></span>${MODE_META[state.mode].name}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`;
+  $('#modePill').innerHTML = `<span class="dot"></span>${MODE_META[wmode].name}${days.meta.cfg.coursesOn ? '' : ' · sans cours'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`;
   $('#strip').innerHTML = `<button type="button" class="arr" data-act="wk" data-v="-7" aria-label="Semaine précédente">‹</button><div class="days" role="tablist">${days.map(d => {
     const di = iso(d.date);
     return `<button type="button" role="tab" class="sd${di === todayIso() ? ' today' : ''}" aria-selected="${di === selDate}" data-act="pick" data-v="${di}"><span class="l">${DAYS_S[d.d]}</span><span class="n">${d.date.getDate()}</span><span class="p"><i style="width:${d.plan ? d.dn / d.plan * 100 : 0}%"></i></span></button>`;
@@ -288,7 +332,8 @@ function renderToday() {
   const main = day.ev;
   const M = days.meta;
   let hero = '';
-  if (day.off) hero = `<div class="hero quiet"><div class="k">Jour off</div><div class="t">Repos aujourd’hui</div><div class="s">Le travail de ce jour est réparti sur le reste de la semaine.</div></div>`;
+  if (day.trip) hero = `<div class="hero quiet"><div class="k">${day.tripEdge ? 'Jour de voyage' : 'En voyage'}</div><div class="t">${esc(day.trip.title || 'Voyage')}</div><div class="s">${day.tripEdge ? 'Pas d’étude aujourd’hui. Bon voyage !' : day.plan ? 'Juste ' + hm(day.plan) + ' de révision le matin, le reste du temps est à toi.' : 'Profite, pas d’étude.'}</div></div>`;
+  else if (day.off) hero = `<div class="hero quiet"><div class="k">Jour off</div><div class="t">Repos aujourd’hui</div><div class="s">Le travail de ce jour est réparti sur le reste de la semaine.</div></div>`;
   else if (isToday) {
     const cur = main.find(e => !MINOR.has(e.kind) && e.start <= mins && mins < e.end) || main.find(e => e.start <= mins && mins < e.end);
     const nxt = main.find(e => e.start > mins && !MINOR.has(e.kind));
@@ -300,7 +345,26 @@ function renderToday() {
   }
   let late = '';
   const thisWeek = iso(mondayOf(new Date())) === key;
-  if (thisWeek && M.mustLeftAfter >= 15) late = `<div class="notice warn"><span><b>${hm(M.mustLeftAfter)} de séries ne rentrent plus</b> cette semaine.${state.mode !== 'rattrapage' ? ' Le mode Rattrapage peut t’aider.' : ' Elles passeront à la semaine prochaine.'}</span>${state.mode !== 'rattrapage' ? '<button type="button" data-act="setMode" data-v="rattrapage">Rattrapage</button>' : ''}</div>`;
+  if (thisWeek && M.mustLeftAfter >= 15) late = `<div class="notice warn"><span><b>${hm(M.mustLeftAfter)} de séries ne rentrent plus</b> cette semaine.${wmode !== 'rattrapage' ? ' Le mode Rattrapage peut t’aider.' : ' Elles passeront à la semaine prochaine.'}</span>${wmode !== 'rattrapage' ? `<button type="button" data-act="setMode" data-v="rattrapage" data-w="${key}">Rattrapage</button>` : ''}</div>`;
+  // weekly check-in: Sunday evening for next week, or Monday if this week's mode was never chosen
+  let pickWeek = '';
+  if (isToday) {
+    const dw = dow(now);
+    const target = dw === 6 && now.getHours() >= 16 ? iso(addDays(ws, 7)) : (dw <= 1 && !M.cfg.chosen ? key : null);
+    if (target) {
+      const tc = cfgOf(target), rec = L.recommendMode(state, fromIso(target));
+      const chosen = tc.chosen;
+      pickWeek = `<div class="pickweek"><div class="k">${target === key ? 'Cette semaine' : 'Semaine prochaine'} · du ${dateLbl(fromIso(target))}</div>
+        <b>${chosen ? 'Mode ' + MODE_META[tc.mode].name + ' choisi ✓' : 'Quel mode tu veux ?'}</b>
+        ${rec ? `<p>Conseil : <b>${MODE_META[rec.mode].name}</b>. ${esc(rec.why)}</p>` : ''}
+        <div class="chipsel">${MODE_ORDER.map(k => `<button type="button" class="chipm${tc.mode === k && chosen ? ' on' : ''}${rec && rec.mode === k ? ' rec' : ''}" data-act="setMode" data-v="${k}" data-w="${target}" style="--m:${MODE_COLORS[k]}">${MODE_META[k].name}</button>`).join('')}</div>
+        <label class="row-sw" style="padding:10px 0 0;border:0"><span class="bd"><span class="ti">J’ai cours cette semaine-là</span></span><input type="checkbox" class="sw" data-courses="${target}" ${tc.coursesOn ? 'checked' : ''}${tc.tripDays >= 3 ? ' disabled' : ''}></label></div>`;
+    }
+  }
+  // advice before a trip or after it (once per week, only if the current mode differs)
+  let advice = '';
+  const recNow = thisWeek ? L.recommendMode(state, ws) : null;
+  if (recNow && recNow.mode !== wmode && !pickWeek) advice = `<div class="notice"><span><b>Conseil : mode ${MODE_META[recNow.mode].name}.</b> ${esc(recNow.why)}</span><button type="button" data-act="setMode" data-v="${recNow.mode}" data-w="${key}">Passer</button></div>`;
   else if (thisWeek && M.lateMin >= 15) late = `<div class="notice"><span><b>${hm(M.lateMin)} pas faits</b> cette semaine : c’est déjà replacé${M.extended ? ', avec ' + hm(M.extended) + ' de rattrapage' : ''}.</span></div>`;
   const st = main.filter(e => e.kind === 'study'), stDone = st.filter(e => e.state === 'done');
   const prog = st.length ? `<div class="prog"><span><b>${stDone.length}/${st.length}</b> blocs</span><span class="track"><i style="width:${stDone.length / st.length * 100}%"></i></span><span class="num">${hm(day.dn)} / ${hm(day.plan)}</span></div>` : '';
@@ -322,9 +386,9 @@ function renderToday() {
       <div class="card"><div class="bd"><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}</div>` : ''}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
-  $('#todayBody').innerHTML = `${hero}${late}${notice}${prog}<div class="tl">${rows.join('')}</div>
+  $('#todayBody').innerHTML = `${pickWeek}${hero}${late}${advice}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
-    <div class="day-actions"><button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button><button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
+    <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
 }
 
 /* ---------- Calendrier ---------- */
@@ -338,20 +402,25 @@ function renderCal() {
     const dots = [];
     if (state.events.some(x => x.date === di)) dots.push('<i class="i-ev"></i>');
     if (state.offDays.includes(di)) dots.push('<i class="i-off"></i>');
+    if (L.tripOn(state, di)) dots.push('<i class="i-trip"></i>');
+    if ((state.mocks || []).some(x => x.date === di)) dots.push('<i class="i-mock"></i>');
     if (state.subjects.some(s => s.exam === di)) dots.push('<i class="i-ex"></i>');
     cells.push(`<button type="button" class="cell${d.getMonth() !== mo ? ' out' : ''}${di === todayIso() ? ' today' : ''}" data-act="calday" data-v="${di}" aria-selected="${di === calSel}" aria-label="${longDate(d)}"><span class="n">${d.getDate()}</span><span class="dots">${dots.join('')}</span></button>`);
   }
   const items = [];
   state.subjects.filter(s => s.exam === calSel).forEach(s => items.push(`<button type="button" class="li" data-act="editExam" data-v="${esc(s.id)}" style="--c:var(--exam)"><span class="dt"></span><span class="bd"><span class="ti">Examen · ${esc(s.name)}</span></span>${CHEV}</button>`));
+  const tr = L.tripOn(state, calSel);
+  if (tr) items.push(`<button type="button" class="li" data-act="editTrip" data-v="${esc(tr.trip.id)}" style="--c:#0F766E"><span class="dt"></span><span class="bd"><span class="ti">${esc(tr.trip.title || 'Voyage')}</span><span class="su">Du ${dateLbl(fromIso(tr.trip.from))} au ${dateLbl(fromIso(tr.trip.to))}${tr.edge ? ' · jour de voyage' : ''}</span></span>${CHEV}</button>`);
+  (state.mocks || []).filter(x => x.date === calSel).forEach(x => { const su = subjOf(state, x.subj); items.push(`<button type="button" class="li" data-act="editMock" data-v="${esc(x.id)}" style="--c:#DB2777"><span class="dt"></span><span class="bd"><span class="ti">Examen blanc · ${esc(su ? su.name : '')}</span><span class="su">Facultatif${x.place ? ' · ' + esc(x.place) : ''}</span></span><span class="rt">${fmt(x.start)}<br>${fmt(x.end)}</span>${CHEV}</button>`); });
   if (state.offDays.includes(calSel)) items.push(`<button type="button" class="li" data-act="offDay" data-v="${calSel}" style="--c:var(--faint)"><span class="dt"></span><span class="bd"><span class="ti">Jour off</span><span class="su">Touche pour annuler</span></span></button>`);
   state.events.filter(x => x.date === calSel).sort((a, b) => a.start - b.start).forEach(x => items.push(`<button type="button" class="li" data-act="editEvent" data-v="${esc(x.id)}" style="--c:var(--acc)"><span class="dt"></span><span class="bd"><span class="ti">${esc(x.title)}</span>${x.place ? `<span class="su">${esc(x.place)}</span>` : ''}</span><span class="rt">${fmt(x.start)}<br>${fmt(x.end)}</span>${CHEV}</button>`));
   const sel = fromIso(calSel);
   $('#calBody').innerHTML = `
     <div class="cal-h"><button type="button" data-act="calm" data-v="-1" aria-label="Mois précédent">‹</button><b>${MONTHS_L[mo]} ${y}</b><button type="button" data-act="calm" data-v="1" aria-label="Mois suivant">›</button></div>
     <div class="cal">${DAYS_S.map(n => `<span class="wd">${n}</span>`).join('')}${cells.join('')}</div>
-    <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Jour off</span><span><i class="i-ex"></i>Examen</span></div>
+    <div class="legend"><span><i class="i-ev"></i>Événement</span><span><i class="i-off"></i>Off</span><span><i class="i-trip"></i>Voyage</span><span><i class="i-mock"></i>Exam blanc</span><span><i class="i-ex"></i>Examen</span></div>
     <div class="sec-t">${longDate(sel)}<button type="button" data-act="openDay">Voir la journée</button></div>
-    <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour un événement, un jour off ou un examen.</div>'}</div>`;
+    <div class="group">${items.join('') || '<div class="empty">Rien d’ajouté ce jour-là. Touche + pour ajouter quelque chose.</div>'}</div>`;
 }
 
 /* ---------- Ma semaine type ---------- */
@@ -360,7 +429,13 @@ function renderWeek() {
   const courseRows = byDay.map((list, i) => list.length ? `<div class="dayhead">${DAYS[i]}</div>` + list.map(c => { const s = subjOf(state, c.subj); return `<button type="button" class="li" data-act="editCourse" data-v="${c.id}" style="--c:${esc(s ? s.color : '')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s ? s.name : 'Cours')}</span><span class="su">${esc([c.type, c.room].filter(Boolean).join(' · '))}</span></span><span class="rt">${fmt(c.start)}<br>${fmt(c.end)}</span>${CHEV}</button>`; }).join('') : '').join('');
   const prioL = ['', 'Importance faible', 'Importance normale', 'Importance haute'];
   $('#weekBody').innerHTML = `
-    <div class="group" style="margin-top:18px"><label class="row-sw"><span class="bd"><span class="ti">J’ai cours cette semaine</span><span class="su">Coupe pendant la session ou les vacances</span></span><input type="checkbox" class="sw" id="coursesOn" ${state.coursesOn ? 'checked' : ''}></label></div>
+    ${(() => {
+      const today = todayIso(), up = [];
+      (state.trips || []).filter(t => t.to >= today).forEach(t => up.push([t.from, `<button type="button" class="li" data-act="editTrip" data-v="${esc(t.id)}" style="--c:#0F766E"><span class="dt"></span><span class="bd"><span class="ti">${esc(t.title)}</span><span class="su">Voyage · du ${dateLbl(fromIso(t.from))} au ${dateLbl(fromIso(t.to))}</span></span>${CHEV}</button>`]));
+      (state.mocks || []).filter(t => t.date >= today).forEach(t => { const su = subjOf(state, t.subj); up.push([t.date, `<button type="button" class="li" data-act="editMock" data-v="${esc(t.id)}" style="--c:#DB2777"><span class="dt"></span><span class="bd"><span class="ti">Examen blanc · ${esc(su ? su.name : '')}</span><span class="su">${longDate(fromIso(t.date))} · ${fmt(t.start)}</span></span>${CHEV}</button>`]); });
+      state.subjects.filter(su => su.exam && su.exam >= today).forEach(su => up.push([su.exam, `<button type="button" class="li" data-act="editExam" data-v="${esc(su.id)}" style="--c:var(--exam)"><span class="dt"></span><span class="bd"><span class="ti">Examen · ${esc(su.name)}</span><span class="su">${longDate(fromIso(su.exam))}</span></span>${CHEV}</button>`]));
+      return up.length ? `<div class="sec-t" style="margin-top:18px">À venir</div><div class="group">${up.sort((a, b) => a[0].localeCompare(b[0])).map(x => x[1]).join('')}</div>` : '';
+    })()}
     <div class="sec-t">Horaire<button type="button" data-act="editCourse">+ Cours</button></div>
     <div class="group">${courseRows || '<div class="empty">Aucun cours.</div>'}</div>
     <div class="sec-t">Matières<button type="button" data-act="editSubject">+ Matière</button></div>
@@ -395,8 +470,8 @@ function renderSet() {
     <div class="sec-t">Horaires</div>
     <div class="group"><button type="button" class="li" data-act="hoursSheet"><span class="bd"><span class="ti">Réveil ${fmt(state.wake)} · coucher ${fmt(state.sleep)}</span><span class="su">Du lundi au vendredi, dans tous les modes</span></span>${CHEV}</button></div>
     <div class="sec-t">Mode</div>
-    <div class="group"><button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[state.mode]}"><span class="dt"></span><span class="bd"><span class="ti">${MODE_META[state.mode].name}</span><span class="su">Changer de mode</span></span>${CHEV}</button>
-      <button type="button" class="li" data-act="tuneMode"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[state.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>
+    ${(() => { const c = cfgOf(iso(mondayOf(new Date()))); return `<div class="group"><button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">Mode de cette semaine · changer</span></span>${CHEV}</button>
+      <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span>`; })()}<span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>
     <div class="sec-t">Widget</div>
     <div class="group"><button type="button" class="li" data-act="widgetSheet"><span class="bd"><span class="ti">Widget pour l’écran d’accueil</span><span class="su">Ton programme sans ouvrir l’app</span></span>${CHEV}</button></div>
     <div class="sec-t">Sauvegarde</div>
@@ -493,9 +568,13 @@ document.addEventListener('click', async e => {
     }
     case 'offDay': toggleOff(v); closeSheet(); return;
     case 'hoursSheet': hoursSheet(); return;
-    case 'modeSheet': modeSheet(); return;
-    case 'setMode': state.mode = v; save(); renderAll(); closeSheet(); toast('Mode ' + MODE_META[v].name); return;
-    case 'tuneMode': tuneMode(); return;
+    case 'modeSheet': modeSheet(b.dataset.w); return;
+    case 'setMode': { const wk = b.dataset.w || wkOf(selDate); state.weekModes[wk] = v; if (wk >= iso(mondayOf(new Date()))) state.mode = v; save(); renderAll(); closeSheet(); toast('Mode ' + MODE_META[v].name + (wk === iso(mondayOf(new Date())) ? '' : ' pour la semaine du ' + dateLbl(fromIso(wk)))); return; }
+    case 'tuneMode': tuneMode(v); return;
+    case 'newMock': editMock(null, calSel); return;
+    case 'editMock': editMock(v); return;
+    case 'newTrip': editTrip(null, calSel); return;
+    case 'editTrip': editTrip(v); return;
     case 'weekSheet': weekSheet(); return;
     case 'goSet': showTab('set'); return;
     case 'calm': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + (+v), 1); renderCal(); return;
@@ -520,14 +599,19 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
-  if (t.id === 'coursesOn') { state.coursesOn = t.checked; save(); renderToday(); return; }
+  if (t.dataset.courses) {
+    const wk = t.dataset.courses; state.noCourseWeeks = state.noCourseWeeks.filter(x => x !== wk);
+    if (!t.checked) state.noCourseWeeks.push(wk);
+    if (!state.weekModes[wk]) state.weekModes[wk] = cfgOf(wk).mode;
+    save(); renderToday(); renderSet(); toast(t.checked ? 'Semaine avec cours' : 'Semaine de travail sans cours'); return;
+  }
   if (t.dataset.nf) { if (t.dataset.nf === 'sport') { state.notif.sport = state.notif.routine = t.checked; state.notif.event = t.checked ? 15 : 0; } else if (t.dataset.nf === 'morning') { state.notif.morning = state.notif.evening = t.checked; } else state.notif[t.dataset.nf] = t.checked; save(); return; }
   if (t.dataset.nfn) { state.notif[t.dataset.nfn] = +t.value; save(); }
 });
 
 
 /* ---------- bubble touch effect ---------- */
-const BUB_SEL = '.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
+const BUB_SEL = '.chipm,.btn,.linkbtn,.li,.mopt,.mode-pill,.fab,.sd,.cell,.chk,.nav button,.notice button,.cal-h button,.strip .arr,.sec-t button';
 document.addEventListener('pointerdown', e => {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const el = e.target.closest(BUB_SEL); if (!el) return;
