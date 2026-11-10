@@ -149,6 +149,15 @@ export async function moodleRoute(req, env, url, json) {
       if (token && !/^[a-f0-9]{32}$/i.test(token)) return json({ error: 'La clé fait 32 caractères (chiffres et lettres a à f)' }, 400);
       cur.token = token || undefined;
     }
+    if (Array.isArray(data.tokens)) {
+      // several possible readings of the same key: keep the one Moodle accepts
+      let good = null, last = '';
+      for (const t of data.tokens.slice(0, 8).map(String).filter(t => /^[a-f0-9]{32}$/.test(t))) {
+        try { await ws(t, 'core_webservice_get_site_info'); good = t; break; } catch (e) { last = e.code === 'invalidtoken' ? 'Clé refusée par Moodle' : String(e.message || e); }
+      }
+      if (!good) return json({ error: last || 'Clé illisible : recopie toute l’adresse' }, 400);
+      cur.token = good;
+    }
     await env.KV.put('mcfg:' + k, JSON.stringify(cur));
     const l = (await env.KV.get('mlist', 'json')) || []; if (!l.includes(k)) { l.push(k); await env.KV.put('mlist', JSON.stringify(l.slice(-10))); }
     const dig = await refreshMoodle(env, k, true);

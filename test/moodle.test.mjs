@@ -29,3 +29,21 @@ const d = await r.json();
 assert.ok(d.ok.ical && d.ok.api, JSON.stringify(d.errors));
 assert.equal(d.events.length, 3, 'dedup ical/api'); assert.equal(d.items.length, 2); assert.equal(d.items[0].kind, 'correction'); assert.equal(d.announcements[0].text, 'CO1 & CO2'); assert.equal(d.user, 'Alex');
 console.log('moodle OK');
+// several candidate keys: the one Moodle accepts is kept
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u, o) => { const b = o && o.body ? new URLSearchParams(o.body) : null; if (b && b.get('wstoken') !== 'cd'.repeat(16)) return new Response(JSON.stringify({ exception: 'x', errorcode: 'invalidtoken' })); return realFetch(u, o); };
+  const k2 = 'b'.repeat(32);
+  let r2 = await moodleRoute(new Request('https://x/moodle', { method: 'POST', body: JSON.stringify({ k: k2, tokens: ['ef'.repeat(16), 'cd'.repeat(16)] }) }), { KV }, new URL('https://x/moodle'), json);
+  const d2 = await r2.json(); assert.ok(d2.ok.api, 'token candidates');
+  assert.equal(JSON.parse(store.get('mcfg:' + k2)).token, 'cd'.repeat(16));
+  r2 = await moodleRoute(new Request('https://x/moodle', { method: 'POST', body: JSON.stringify({ k: k2, tokens: ['ef'.repeat(16)] }) }), { KV }, new URL('https://x/moodle'), json);
+  assert.equal(r2.status, 400);
+  console.log('moodle tokens OK');
+}
+{
+  const { createRequire } = await import('module'); const L = createRequire(import.meta.url)('../site/logic.js');
+  const tok = '0123456789abcdef0123456789abcdef', b = Buffer.from('a1b2c3d4e5f60718293a4b5c6d7e8f90:::' + tok + ':::AbCdEf123').toString('base64');
+  assert.ok(L.moodleTokens('https://token=' + b).includes(tok)); assert.ok(L.moodleTokens('https://token=' + b.toLowerCase()).includes(tok)); assert.deepEqual(L.moodleTokens('nope'), []);
+  console.log('moodle launch OK');
+}

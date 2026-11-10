@@ -869,6 +869,31 @@ function freezePast(S, now) {
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
 
-const API = { corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+
+/* Moodle key from the "launch" trick: the browser ends on https://token=<base64 of "sig:::token:::private">.
+ * Safari may lowercase that address, so each 4-letter group is re-cased until it decodes to what is expected. */
+function moodleTokens(text) {
+  let s = String(text || '');
+  const i = s.lastIndexOf('token='); if (i < 0) return [];
+  s = s.slice(i + 6); try { s = decodeURIComponent(s); } catch (e) { }
+  s = s.replace(/[^A-Za-z0-9+/]/g, '');
+  const B = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const dec = g => { const v = [...g].map(c => B.indexOf(c)); const n = (v[0] << 18) | (v[1] << 12) | ((v[2] || 0) << 6) | (v[3] || 0); return String.fromCharCode((n >> 16) & 255, (n >> 8) & 255, n & 255).slice(0, g.length - 1); };
+  const ok = (ch, pos) => pos < 32 || (pos >= 35 && pos < 67) ? /[0-9a-f]/.test(ch) : pos < 35 || (pos >= 67 && pos < 70) ? ch === ':' : /[0-9A-Za-z]/.test(ch);
+  const groups = [];
+  for (let g = 0; g * 4 < Math.min(s.length, 96); g++) {
+    const raw = s.slice(g * 4, g * 4 + 4), letters = [...raw].map((c, k) => /[a-z]/i.test(c) ? k : -1).filter(k => k >= 0), cands = new Set();
+    for (let m = 0; m < 1 << letters.length; m++) {
+      const v = [...raw]; letters.forEach((k, b) => { v[k] = m >> b & 1 ? v[k].toUpperCase() : v[k].toLowerCase(); });
+      const d = dec(v.join('')); if ([...d].every((ch, j) => ok(ch, g * 3 + j))) cands.add(d);
+    }
+    groups.push([...cands]);
+  }
+  let outs = [''];
+  for (const g of groups.slice(0, 23)) { const next = []; for (const o of outs) for (const c of g) next.push(o + c); outs = next.slice(0, 16); if (!outs.length) return []; }
+  return [...new Set(outs.map(o => o.slice(35, 67)).filter(t => /^[0-9a-f]{32}$/.test(t)))].slice(0, 8);
+}
+
+const API = { moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

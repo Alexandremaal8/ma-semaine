@@ -512,7 +512,7 @@ function renderToday() {
   const prop = thisWeek ? proposal(ws, key, M, wmode) : '';
   $('#todayBody').innerHTML = `${pickWeek}${hero}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
-    ${isToday ? mdTodayCard() : ''}
+    ${isToday ? mdFeedCard() + mdTodayCard() : ''}
     <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
 }
 
@@ -660,7 +660,7 @@ async function mdFetch(force) {
   if (!force && moodle && Date.now() - (moodle.fetched || 0) < 30 * 60e3) return;
   try {
     const d = await fetch(WORKER + '/moodle?k=' + syncKey() + (force ? '&force=1' : '')).then(r => r.json());
-    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); keepScroll(renderAll); }
+    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); mdApply(); keepScroll(renderAll); }
     return d;
   } catch (e) { return null; }
 }
@@ -710,7 +710,62 @@ function moodleSet() {
   const when = moodle && moodle.at ? new Date(moodle.at) : null;
   return `<div class="status"><b>${err ? 'Moodle : problème de lecture' : 'Moodle connecté'}</b>${err ? esc(err) + '. Reconnecte avec un nouveau lien.' : up.length + ' échéance' + (up.length > 1 ? 's' : '') + ' à venir' + (when ? ' · mis à jour à ' + fmt(when.getHours() * 60 + when.getMinutes()) : '')}</div>
     <button type="button" class="li" data-act="mdMap"><span class="bd"><span class="ti">Cours ↔ matières</span><span class="su">${mdUnmapped().length ? mdUnmapped().length + ' cours pas encore reliés' : 'Tous les cours sont reliés'}</span></span>${CHEV}</button>
+    <button type="button" class="li" data-act="mdKey"><span class="bd"><span class="ti">${moodle && moodle.ok && moodle.ok.api ? 'Séries, corrigés et annonces : actifs' : 'Tout automatiser'}</span><span class="su">${moodle && moodle.ok && moodle.ok.api ? (moodle.courses || []).length + ' cours suivis · touche pour gérer la clé' : (moodle && moodle.errors && moodle.errors.api ? esc(moodle.errors.api) : 'Nouvelles séries, corrigés et annonces, avec la clé Moodle')}</span></span>${CHEV}</button>
     <div class="btns"><button type="button" class="btn" data-act="mdRefresh">Actualiser</button><button type="button" class="btn" data-act="mdConnect">Changer le lien</button><button type="button" class="btn" data-act="mdOff">Déconnecter</button></div>`;
+}
+
+/* with the Moodle key: files (séries, corrigés) and announcements */
+function mdCourseSubj(id) {
+  const c = ((moodle && moodle.courses) || []).find(x => x.id === id); if (!c) return null;
+  const code = (c.short.match(/[A-Z]{2,5}-\d{3}/) || [])[0];
+  return (code && mdSubj(code, '')) || mdSubj(c.short, '') || mdSubj(c.name, '');
+}
+function mdFeed() {
+  if (!moodle || !moodle.ok || !moodle.ok.api) return [];
+  const since = Date.now() - 4 * 864e5, dis = state.dismiss || {};
+  const items = (moodle.items || []).filter(i => i.time > since && i.kind !== 'other').map(i => ({ id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: i.title, tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Nouveau', url: i.url }));
+  const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.text, tag: 'Annonce' }));
+  return items.concat(ann).filter(x => !dis['mf:' + x.id]).sort((a, b) => b.t - a.t).slice(0, 5);
+}
+// a corrigé published earlier than planned moves the correction forward, automatically
+function mdApply() {
+  if (!moodle || !moodle.ok || !moodle.ok.api) return;
+  const done = []; state.corrSeen = state.corrSeen || {};
+  for (const i of moodle.items || []) {
+    if (i.kind !== 'correction' || i.time < Date.now() - 10 * 864e5) continue;
+    const subj = mdCourseSubj(i.course), su = subj && subjOf(state, subj); if (!su) continue;
+    const d = new Date(i.time), ws = mondayOf(d), wk = iso(ws), di = iso(d);
+    const av = L.corrAvail(state, ws, su); if (!av || av <= fromIso(di)) continue;
+    const m = state.corrSeen[wk] = state.corrSeen[wk] || {}; if (m[subj]) continue;
+    if (!done.length) beginChange();
+    m[subj] = di; done.push(su.name);
+  }
+  if (done.length) { save(); renderAll(); endChange('Corrigé publié sur Moodle', 'La correction de ' + done.join(', ') + ' est avancée.'); }
+}
+function mdFeedCard() {
+  const f = mdFeed(); if (!f.length) return '';
+  const ago = t => { const h = Math.round((Date.now() - t) / 3600e3); return h < 1 ? 'à l’instant' : h < 24 ? 'il y a ' + h + ' h' : 'il y a ' + Math.round(h / 24) + ' j'; };
+  return `<div class="sec-t">Nouveautés Moodle</div><div class="group">${f.map(x => { const su = x.subj ? subjOf(state, x.subj) : null; return `<div class="li" style="--c:${su ? esc(su.color) : '#F98012'}"><span class="dt"></span><span class="bd"><span class="ti">${deacc(x.title).startsWith(deacc(x.tag)) ? '' : `<span class="tag cu" style="margin:0 6px 0 0">${x.tag}</span>`}${esc(x.title)}</span><span class="su">${esc(su ? su.name : 'Moodle')} · ${ago(x.t)}${x.text ? ' · ' + esc(x.text.slice(0, 110)) + (x.text.length > 110 ? '…' : '') : ''}</span></span><button type="button" class="linkbtn mini" style="margin:0" data-act="dismiss" data-v="mf:${esc(x.id)}" aria-label="Masquer">OK</button></div>`; }).join('')}</div>`;
+}
+function moodleKeySheet() {
+  const L1 = 'https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https';
+  openSheet('Tout automatiser', `<p style="margin:0 0 10px;color:var(--muted)">Avec la clé, l’app voit aussi les nouvelles séries, les corrigés et les annonces de tes cours.</p>
+    <ol class="steps"><li>Dans Safari (connecté à Moodle), ouvre <button type="button" class="linkbtn mini" data-act="mdCopyLaunch" style="margin:0">ce lien</button></li><li>Refuse d’ouvrir l’app Moodle si on te le propose</li><li>Sur la page « serveur introuvable », touche l’adresse en haut, sélectionne tout et copie</li></ol>
+    <div class="fields">${F.text('addr', 'Adresse copiée', '', 'full', 'https://token=…')}</div>
+    <p class="hint" style="margin-top:10px">La clé reste sur ton serveur. Pour la révoquer : Moodle → Preferences → Security keys.</p>
+    <div class="sh-actions">${moodle && moodle.ok && moodle.ok.api ? '<button type="submit" class="btn danger" value="delete">Retirer la clé</button>' : ''}<button type="submit" class="btn pri" value="save">Activer</button></div>`, (fd, btn) => {
+    if (isDel(btn)) { (async () => { await post('/moodle', { k: syncKey(), token: '' }).catch(() => { }); await mdFetch(true); renderAll(); toast('Clé retirée'); })(); return; }
+    const toks = L.moodleTokens(fd.addr);
+    if (!toks.length) { toast('Adresse illisible : copie toute l’adresse, elle commence par https://token='); return false; }
+    (async () => {
+      const b = $('#shBody .btn.pri'); if (b) { b.disabled = true; b.textContent = 'Vérification…'; }
+      const d = await post('/moodle', { k: syncKey(), tokens: toks }).then(r => r.json()).catch(() => null);
+      if (!d || d.error || !d.ok || !d.ok.api) { if (b) { b.disabled = false; b.textContent = 'Activer'; } toast(d ? (d.error || (d.errors && d.errors.api) || 'Moodle a refusé la clé') : 'Serveur injoignable, réessaie'); return; }
+      d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); closeSheet(); mdApply(); renderAll();
+      showCard('Moodle entièrement relié', (d.user ? 'Salut ' + d.user + ' ! ' : '') + (d.courses || []).length + ' cours suivis : séries, corrigés et annonces arrivent maintenant dans l’app.');
+    })();
+    return false;
+  });
 }
 const mdWhen = e => { const d = new Date(e.start), m = mdMin(e.start); return DAYS_S[dow(d)] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + (m && m !== 1439 ? ' · ' + fmt(m) : ''); };
 const de = n => (/^[aeiouyhàâéèêîïôû]/i.test(n) ? 'd’' : 'de ') + n;
@@ -738,6 +793,8 @@ function mdProposal() {
 function mdAction(a, v, b) {
   if (a === 'mdConnect') { moodleConnect(); return true; }
   if (a === 'mdMap') { moodleMapSheet(); return true; }
+  if (a === 'mdKey') { moodleKeySheet(); return true; }
+  if (a === 'mdCopyLaunch') { copyText('https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https', 'Lien copié : colle-le dans Safari'); return true; }
   if (a === 'mdRefresh') { mdFetch(true).then(d => toast(d && !d.error ? 'Moodle à jour' : 'Moodle injoignable pour l’instant')); return true; }
   if (a === 'mdOff') { post('/moodle', { k: syncKey(), remove: true }).catch(() => { }); state.moodleOn = false; moodle = null; lsSet(MD_LS, null); save(); renderAll(); toast('Moodle déconnecté'); return true; }
   const e = mdEvents().find(x => x.uid === v); if (!e) return a.startsWith('md');
