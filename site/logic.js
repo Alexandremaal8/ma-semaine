@@ -282,10 +282,20 @@ function layoutDay(S, m, weekStart, d) {
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
   S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
   dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
-  (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r => {
+  // sport and chores happen at home: never while you are on campus or on the way
+  const leaveAt = courses.length ? firstC - COMMUTE - 5 : null;
+  const homeAt = courses.length ? (S.mode === 'charbon' ? Math.max(lastC, 1110) : lastC) + COMMUTE : null;
+  (S.routines || []).filter(r => r.day === d && r.end > r.start).forEach(r0 => {
+    let r = r0;
+    if (r.kind !== 'study' && courses.length && r.start < homeAt && r.end > leaveAt) {
+      const len = r.end - r.start, lim = sleep - 30;
+      let t = homeAt + 5; while (t + len <= lim && !free(t, t + len)) t += 15;
+      if (t + len > lim) return;
+      r = Object.assign({}, r0, { start: t, end: t + len, moved: true });
+    }
     if (!free(r.start, r.end)) return;
     if (r.kind === 'study') { if (!S.coursesOn || !subjOf(S, r.subj)) return; ev.push({ kind: 'fixed', start: r.start, end: r.end, title: r.title, subj: r.subj, rid: r.id }); }
-    else ev.push({ kind: r.kind === 'sport' ? 'sport' : 'routine', start: r.start, end: r.end, title: r.title, rid: r.id });
+    else ev.push({ kind: r.kind === 'sport' ? 'sport' : 'routine', start: r.start, end: r.end, title: r.title, rid: r.id, sub: r.moved ? 'à la maison, après les cours' : undefined, movable: true });
   });
   { // breakfast right after stretching, shortened if something starts early
     const nextBusy = Math.min(wake + 35, ...busy().filter(b => b.start >= wake + 5).map(b => b.start));
@@ -762,6 +772,26 @@ function generate(S0, weekStart, now) {
       fill(x.eveStart, x.wind, FT);
       if (x.we && x.alloc > 0) fill(x.wake + 35, x.eveStart, { kind: 'free', title: 'Libre', sub: 'le reste est à toi' });
       if (x.we && x.alloc === 0) fill(x.wake + 35, x.eveStart, { kind: 'free', title: 'Journée off', sub: 'zéro cours, zéro série' });
+    }
+    // a routine (sport, chores) that lands on a block kept from earlier moves later the same evening
+    const solidK = o => o.end > o.start && !['meal', 'move', 'rest', 'free'].includes(o.kind);
+    for (const e of x.ev.filter(e => e.movable)) {
+      const clash = t => x.ev.some(o => o !== e && !o.movable && solidK(o) && o.start < t + (e.end - e.start) && o.end > t);
+      if (!clash(e.start)) continue;
+      const len = e.end - e.start; let t = e.start;
+      while (t + len <= x.wind && (clash(t) || x.ev.some(o => o !== e && o.movable && !o.drop && o.start < t + len && o.end > t))) t += 15;
+      if (t + len <= x.wind) { e.start = t; e.end = t + len; } else e.drop = true;
+    }
+    x.ev = x.ev.filter(e => !e.drop);
+    // free time gives way to a routine that moved onto it
+    for (const e of x.ev.filter(e => e.movable)) {
+      const out = [];
+      for (const f of x.ev) {
+        if (f.kind !== 'free' || f.start >= e.end || f.end <= e.start) { out.push(f); continue; }
+        if (e.start - f.start >= 15) out.push(Object.assign({}, f, { end: e.start, id: undefined }));
+        if (f.end - e.end >= 15) out.push(Object.assign({}, f, { start: e.end, id: undefined }));
+      }
+      x.ev = out;
     }
     // meals and trips are only markers: if a block kept from earlier sits on one, the marker gives way
     const solid = x.ev.filter(e => e.end > e.start && !['meal', 'move', 'rest', 'free'].includes(e.kind));
