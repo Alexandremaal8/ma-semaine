@@ -85,7 +85,7 @@ async function handle(req, env) {
     if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
     return json((await env.KV.get('store:' + k, 'json')) || { updated: 0, state: null });
   }
-  if (url.pathname === '/moodle') { const r = await moodleRoute(req, env, url, json); if (r) return r; }
+  if (url.pathname === '/moodle' || url.pathname === '/moodle/file') { const r = await moodleRoute(req, env, url, json); if (r) return r; }
   if (url.pathname === '/health') return json({ ok: true, subs: (await index(env)).length });
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const text = await req.text();
@@ -175,8 +175,8 @@ async function moodleTick(env) {
       const oldEv = new Set((old.events || []).map(e => e.uid));
       const cname = id => ((dig.courses || []).find(c => c.id === id) || {}).short || '';
       const fresh = [
-        ...(dig.items || []).filter(i => !seen.has(i.title + i.time) && i.kind !== 'other').map(i => ({ title: (i.kind === 'correction' ? 'Corrigé dispo' : i.kind === 'serie' ? 'Nouvelle série' : 'Nouveau sur Moodle') + (cname(i.course) ? ' · ' + cname(i.course) : ''), body: i.title })),
-        ...(dig.announcements || []).filter(a => !seen.has(a.title + a.time)).map(a => ({ title: 'Annonce' + (cname(a.course) ? ' · ' + cname(a.course) : ''), body: a.title })),
+        ...(dig.items || []).filter(i => !seen.has(i.title + i.time) && i.time > old.at - 3600e3).map(i => ({ title: (i.kind === 'correction' ? 'Corrigé dispo' : i.kind === 'serie' ? 'Nouvelle série' : 'Nouveau document') + (cname(i.course) ? ' · ' + cname(i.course) : ''), body: i.title })),
+        ...(dig.announcements || []).filter(a => !seen.has(a.title + a.time) && a.time > old.at - 3600e3).map(a => ({ title: 'Annonce' + (cname(a.course) ? ' · ' + cname(a.course) : ''), body: a.title })),
         ...(dig.events || []).filter(e => !oldEv.has(e.uid) && e.start > Date.now() && e.start < Date.now() + 30 * 864e5).map(e => ({ title: 'Nouveau sur Moodle' + (e.course ? ' · ' + e.course : ''), body: e.title + ' · ' + new Date(e.start).toLocaleDateString('fr-CH', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Zurich' }) + ' — ouvre l’app pour le caser' }))
       ].slice(0, 3);
       if (!fresh.length) continue;

@@ -505,7 +505,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}${mdBlockLinks(e)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -711,6 +711,7 @@ function moodleSet() {
   return `<div class="status"><b>${err ? 'Moodle : problème de lecture' : 'Moodle connecté'}</b>${err ? esc(err) + '. Reconnecte avec un nouveau lien.' : up.length + ' échéance' + (up.length > 1 ? 's' : '') + ' à venir' + (when ? ' · mis à jour à ' + fmt(when.getHours() * 60 + when.getMinutes()) : '')}</div>
     <button type="button" class="li" data-act="mdMap"><span class="bd"><span class="ti">Cours ↔ matières</span><span class="su">${mdUnmapped().length ? mdUnmapped().length + ' cours pas encore reliés' : 'Tous les cours sont reliés'}</span></span>${CHEV}</button>
     <button type="button" class="li" data-act="mdKey"><span class="bd"><span class="ti">${moodle && moodle.ok && moodle.ok.api ? 'Séries, corrigés et annonces : actifs' : 'Tout automatiser'}</span><span class="su">${moodle && moodle.ok && moodle.ok.api ? (moodle.courses || []).length + ' cours suivis · touche pour gérer la clé' : (moodle && moodle.errors && moodle.errors.api ? esc(moodle.errors.api) : 'Nouvelles séries, corrigés et annonces, avec la clé Moodle')}</span></span>${CHEV}</button>
+    ${mdApi() ? `<button type="button" class="li" data-act="mdDocsPick"><span class="bd"><span class="ti">Documents des cours</span><span class="su">Séries, corrigés, slides… à ouvrir directement</span></span>${CHEV}</button>` : ''}
     <div class="btns"><button type="button" class="btn" data-act="mdRefresh">Actualiser</button><button type="button" class="btn" data-act="mdConnect">Changer le lien</button><button type="button" class="btn" data-act="mdOff">Déconnecter</button></div>`;
 }
 
@@ -723,7 +724,7 @@ function mdCourseSubj(id) {
 function mdFeed() {
   if (!moodle || !moodle.ok || !moodle.ok.api) return [];
   const since = Date.now() - 4 * 864e5, dis = state.dismiss || {};
-  const items = (moodle.items || []).filter(i => i.time > since && i.kind !== 'other').map(i => ({ id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: i.title, tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Nouveau', url: i.url }));
+  const items = (moodle.items || []).filter(i => i.time > since).map(i => ({ file: i.file, id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: i.title, tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Doc', url: i.url }));
   const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.text, tag: 'Annonce' }));
   return items.concat(ann).filter(x => !dis['mf:' + x.id]).sort((a, b) => b.t - a.t).slice(0, 5);
 }
@@ -745,7 +746,7 @@ function mdApply() {
 function mdFeedCard() {
   const f = mdFeed(); if (!f.length) return '';
   const ago = t => { const h = Math.round((Date.now() - t) / 3600e3); return h < 1 ? 'à l’instant' : h < 24 ? 'il y a ' + h + ' h' : 'il y a ' + Math.round(h / 24) + ' j'; };
-  return `<div class="sec-t">Nouveautés Moodle</div><div class="group">${f.map(x => { const su = x.subj ? subjOf(state, x.subj) : null; return `<div class="li" style="--c:${su ? esc(su.color) : '#F98012'}"><span class="dt"></span><span class="bd"><span class="ti">${deacc(x.title).startsWith(deacc(x.tag)) ? '' : `<span class="tag cu" style="margin:0 6px 0 0">${x.tag}</span>`}${esc(x.title)}</span><span class="su">${esc(su ? su.name : 'Moodle')} · ${ago(x.t)}${x.text ? ' · ' + esc(x.text.slice(0, 110)) + (x.text.length > 110 ? '…' : '') : ''}</span></span><button type="button" class="linkbtn mini" style="margin:0" data-act="dismiss" data-v="mf:${esc(x.id)}" aria-label="Masquer">OK</button></div>`; }).join('')}</div>`;
+  return `<div class="sec-t">Nouveautés Moodle</div><div class="group">${f.map(x => { const su = x.subj ? subjOf(state, x.subj) : null; return `<div class="li" style="--c:${su ? esc(su.color) : '#F98012'}"${x.file ? ` data-act="mdOpen" data-v="${esc(x.file)}" role="button" tabindex="0"` : ''}><span class="dt"></span><span class="bd"><span class="ti">${deacc(x.title).startsWith(deacc(x.tag)) ? '' : `<span class="tag cu" style="margin:0 6px 0 0">${x.tag}</span>`}${esc(x.title)}</span><span class="su">${esc(su ? su.name : 'Moodle')} · ${ago(x.t)}${x.file ? ' · touche pour ouvrir' : ''}${x.text ? ' · ' + esc(x.text.slice(0, 110)) + (x.text.length > 110 ? '…' : '') : ''}</span></span><button type="button" class="linkbtn mini" style="margin:0" data-act="dismiss" data-v="mf:${esc(x.id)}" aria-label="Masquer">OK</button></div>`; }).join('')}</div>`;
 }
 function moodleKeySheet() {
   const L1 = 'https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https';
@@ -766,6 +767,38 @@ function moodleKeySheet() {
     })();
     return false;
   });
+}
+
+/* opening course files (PDF) through the saved Moodle key */
+const mdApi = () => !!(state.moodleOn && moodle && moodle.ok && moodle.ok.api);
+const mdFileUrl = u => WORKER + '/moodle/file?k=' + syncKey() + '&u=' + encodeURIComponent(u);
+function mdOpen(u) { const w = window.open(mdFileUrl(u), '_blank'); if (!w) location.href = mdFileUrl(u); }
+function mdFiles(subj) { return mdApi() ? (moodle.items || []).filter(i => i.file && mdCourseSubj(i.course) === subj) : []; }
+function mdFileFor(e) {
+  if (e.kind !== 'study' || !e.subj || !(e.serie || e.corr)) return null;
+  const n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0), kind = e.corr ? 'correction' : 'serie';
+  return mdFiles(e.subj).find(i => i.kind === kind && (!n || i.num === n)) || null;
+}
+function mdBlockLinks(e) {
+  if (!mdApi()) return '';
+  const out = [];
+  const f = mdFileFor(e); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
+  if (e.corr && e.subj) { const n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0); const sf = mdFiles(e.subj).find(i => i.kind === 'serie' && (!n || i.num === n)); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Énoncé</button>`); }
+  if ((e.kind === 'course' || (e.kind === 'study' && !e.serie && !e.corr)) && e.subj && mdFiles(e.subj).length) out.push(`<button type="button" class="linkbtn mini" data-act="mdDocs" data-v="${esc(e.subj)}">Documents du cours</button>`);
+  return out.length ? `<div class="md-links">${out.join('')}</div>` : '';
+}
+function mdDocsSheet(subj) {
+  const su = subjOf(state, subj), fs = mdFiles(subj);
+  if (!fs.length) { toast('Aucun document trouvé pour ce cours'); return; }
+  const lbl = { serie: 'Série', correction: 'Corrigé', exam: 'Examen' };
+  const rows = fs.slice(0, 80).map(i => `<button type="button" class="li" data-act="mdOpen" data-v="${esc(i.file)}"><span class="bd"><span class="ti">${lbl[i.kind] && !deacc(i.title).startsWith(deacc(lbl[i.kind])) ? `<span class="tag cu" style="margin:0 6px 0 0">${lbl[i.kind]}</span>` : ''}${esc(i.title)}</span><span class="su">${esc(i.section || '')}${i.section ? ' · ' : ''}${dateLbl(new Date(i.time))}</span></span>${CHEV}</button>`).join('');
+  openSheet('Documents · ' + (su ? su.name : ''), `<div class="group">${rows}</div>`, () => true);
+  const f = $('#shBody .sh-actions'); if (f) f.remove();
+}
+function mdDocsPick() {
+  const subs = state.subjects.filter(su => mdFiles(su.id).length);
+  if (!subs.length) { toast('Aucun document trouvé pour l’instant'); return; }
+  openSheet('Documents des cours', `<div class="group">${subs.map(su => `<button type="button" class="li" style="--c:${esc(su.color)}" data-act="mdDocs" data-v="${esc(su.id)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(su.name)}</span><span class="su">${mdFiles(su.id).length} documents</span></span>${CHEV}</button>`).join('')}</div>`, () => true);
 }
 const mdWhen = e => { const d = new Date(e.start), m = mdMin(e.start); return DAYS_S[dow(d)] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + (m && m !== 1439 ? ' · ' + fmt(m) : ''); };
 const de = n => (/^[aeiouyhàâéèêîïôû]/i.test(n) ? 'd’' : 'de ') + n;
@@ -794,6 +827,9 @@ function mdAction(a, v, b) {
   if (a === 'mdConnect') { moodleConnect(); return true; }
   if (a === 'mdMap') { moodleMapSheet(); return true; }
   if (a === 'mdKey') { moodleKeySheet(); return true; }
+  if (a === 'mdOpen') { mdOpen(v); return true; }
+  if (a === 'mdDocs') { mdDocsSheet(v); return true; }
+  if (a === 'mdDocsPick') { mdDocsPick(); return true; }
   if (a === 'mdCopyLaunch') { copyText('https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https', 'Lien copié : colle-le dans Safari'); return true; }
   if (a === 'mdRefresh') { mdFetch(true).then(d => toast(d && !d.error ? 'Moodle à jour' : 'Moodle injoignable pour l’instant')); return true; }
   if (a === 'mdOff') { post('/moodle', { k: syncKey(), remove: true }).catch(() => { }); state.moodleOn = false; moodle = null; lsSet(MD_LS, null); save(); renderAll(); toast('Moodle déconnecté'); return true; }
@@ -958,6 +994,8 @@ function renderSet() {
     <div class="group">${status}
       ${N.on ? `<details class="more"><summary>Choisir mes rappels</summary>
         <label class="row-sw"><span class="bd"><span class="ti">Avant un cours</span></span><select data-nfn="course" style="border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--bg)">${[0, 5, 10, 15, 30].map(v => `<option value="${v}"${N.course === v ? ' selected' : ''}>${v ? v + ' min avant' : 'Non'}</option>`).join('')}</select></label>
+        ${T('stretch', 'Stretching', 'Au réveil, avec le minuteur')}
+        ${T('move', 'Départ pour l’EPFL', 'Quand il faut quitter la maison')}
         ${T('study', 'Blocs d’étude', 'Au début de chaque bloc')}
         ${T('morning', 'Matin et soir', 'Programme du jour au réveil, bilan avant de dormir')}
         ${T('deadline', 'Examens', 'Une semaine avant et la veille')}
@@ -1203,11 +1241,14 @@ document.addEventListener('pointerdown', e => {
   el.appendChild(b); setTimeout(() => b.remove(), 650);
 }, { passive: true });
 
+function openStretchToday() { const n = new Date(), ws = mondayOf(n); const b = document.querySelector('.nav button[data-tab="today"]'); if (b) b.click(); const day = L.generate(state, ws, n)[dow(n)]; const st = day && day.ev.find(e => e.kind === 'stretch'); stretchSheet(dow(n), iso(ws), st ? st.id : ''); }
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open === 'stretch') openStretchToday(); });
 /* ---------- boot ---------- */
 renderAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => r.update().catch(() => { })).catch(e => console.warn('sw', e));
 (async () => {
   // opened from a link like …/#lien-<code>: join that device's planning
+  if (/^#ouvrir-stretch/.test(location.hash)) { history.replaceState(null, '', location.pathname); setTimeout(openStretchToday, 400); }
   const m = /^#lien-([a-f0-9]{32})$/.exec(location.hash);
   if (m) { history.replaceState(null, '', location.pathname); await linkWith(m[1]); }
   else await pull(false);

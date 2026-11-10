@@ -134,7 +134,7 @@ function defaultState() {
     ],
     events: [], offDays: [], trips: [], mocks: [], backlog: [], rolled: {}, weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
     modes: clone(MODE_DEFAULTS),
-    notif: { on: false, course: 10, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
+    notif: { on: false, course: 10, stretch: true, move: true, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
     done: {}
   };
 }
@@ -801,15 +801,20 @@ function buildNotifications(S, now, horizonDays) {
         const nC = evs.filter(e => e.kind === 'course').length, st = evs.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
         const first = evs.find(e => e.kind === 'course');
         const parts = [];
-        parts.push('5 min de stretching (' + STRETCH[day.d].name.toLowerCase() + ')');
+        if (!N.stretch) parts.push('5 min de stretching (' + STRETCH[day.d].name.toLowerCase() + ')');
         if (day.off) parts.push('jour off, profite');
         if (nC) parts.push(nC + ' cours' + (first ? ', premier à ' + fmt(first.start) : ''));
         if (st) parts.push(hm(st) + ' d’étude');
         if (evs.some(e => e.kind === 'sport')) parts.push('sport');
-        push(T(day.wake), 'Bonjour ! ' + DAYS[day.d] + ' ' + dateLbl(day.date), parts.length ? 'Aujourd’hui : ' + parts.join(', ') + '.' : 'Journée tranquille.', 'morning');
+        push(T(day.wake + (N.stretch ? 6 : 0)), 'Bonjour ! ' + DAYS[day.d] + ' ' + dateLbl(day.date), parts.length ? 'Aujourd’hui : ' + parts.join(', ') + '.' : 'Journée tranquille.', 'morning');
       }
+      if (N.stretch) { const st = evs.find(e => e.kind === 'stretch'); if (st && st.state !== 'done') push(T(st.start), 'Stretching · 5 min', STRETCH[day.d].name + ' · touche pour lancer le minuteur', 'stretch-' + iso(day.date)); }
       for (const e of evs) {
         if (e.state === 'done') continue;
+        if (e.kind === 'move' && N.move && /→ EPFL/.test(e.title)) {
+          const c = evs.find(x => x.kind === 'course' && x.start >= e.end);
+          push(T(e.start), 'Il est temps de partir', c ? c.title + ' à ' + fmt(c.start) + (c.sub ? ' · ' + c.sub : '') : 'Direction l’EPFL', 'mv' + e.id);
+        }
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
         if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start), 's' + e.id);
         if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + ' à ' + fmt(e.start), 'Prends tes affaires, ça commence dans 10 min.', 'p' + e.id);

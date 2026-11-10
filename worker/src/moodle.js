@@ -60,11 +60,18 @@ export async function readApi(token) {
       const sections = await ws(token, 'core_course_get_contents', { courseid: c.id });
       for (const sec of sections || []) for (const mod of sec.modules || []) {
         if (mod.visible === 0 || mod.uservisible === false) continue;
-        const files = (mod.contents || []).filter(f => f.type === 'file');
-        const t = Math.max(mod.added || 0, ...files.map(f => f.timemodified || f.timecreated || 0));
-        if (!t || t < now - 30 * 86400) continue;
-        const label = files.length === 1 && files[0].filename && !/\.(html?)$/i.test(files[0].filename) ? mod.name + ' (' + files[0].filename + ')' : mod.name;
-        items.push({ course: c.id, title: strip(label).slice(0, 160), section: strip(sec.name).slice(0, 80), time: t * 1000, kind: kindOf(mod.name + ' ' + files.map(f => f.filename).join(' ')), num: numOf(mod.name + ' ' + files.map(f => f.filename).join(' ')), url: (mod.url || '').slice(0, 300) });
+        const files = (mod.contents || []).filter(f => f.type === 'file' && f.fileurl).slice(0, 12);
+        const name = strip(mod.name), base = { course: c.id, section: strip(sec.name).slice(0, 80), url: (mod.url || '').slice(0, 300) };
+        if (!files.length) {
+          const t = mod.added || 0; if (!t || t < now - 150 * 86400) continue;
+          items.push({ ...base, title: name.slice(0, 160), time: t * 1000, kind: kindOf(name), num: numOf(name) });
+          continue;
+        }
+        for (const f of files) {
+          const t = f.timemodified || f.timecreated || mod.added || 0; if (!t || t < now - 150 * 86400) continue;
+          const label = files.length === 1 ? name : name + ' · ' + strip(f.filename).replace(/\.pdf$/i, '');
+          items.push({ ...base, title: label.slice(0, 160), time: t * 1000, kind: kindOf(name + ' ' + f.filename), num: numOf(name + ' ' + f.filename), file: f.fileurl.slice(0, 400), mime: (f.mimetype || '').slice(0, 60) });
+        }
       }
     } catch (e) { /* one course failing must not break the others */ }
   }
@@ -91,7 +98,7 @@ export async function readApi(token) {
   return {
     user: (site.firstname || '').slice(0, 40),
     courses: courses.slice(0, 15).map(c => ({ id: c.id, name: strip(c.fullname).slice(0, 120), short: strip(c.shortname).slice(0, 60) })),
-    items: items.sort((a, b) => b.time - a.time).slice(0, 80),
+    items: items.sort((a, b) => b.time - a.time).slice(0, 400),
     announcements: announcements.sort((a, b) => b.time - a.time).slice(0, 30),
     events
   };
@@ -127,6 +134,16 @@ export async function refreshMoodle(env, k, force) {
 }
 
 export async function moodleRoute(req, env, url, json) {
+  if (url.pathname === '/moodle/file' && req.method === 'GET') {
+    // opens a course file (PDF…) with the saved key; only files listed in this user's digest
+    const k = url.searchParams.get('k') || '', u = url.searchParams.get('u') || '';
+    if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
+    const [cfg, dig] = await Promise.all([env.KV.get('mcfg:' + k, 'json'), env.KV.get('mdig:' + k, 'json')]);
+    if (!cfg || !cfg.token || !dig || !(dig.items || []).some(i => i.file === u) || !u.startsWith(BASE + '/webservice/pluginfile.php/')) return new Response('Fichier introuvable', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
+    const r = await fetch(u + (u.includes('?') ? '&' : '?') + 'token=' + cfg.token, { headers: UA });
+    const h = new Headers({ 'Content-Type': r.headers.get('Content-Type') || 'application/pdf', 'Content-Disposition': 'inline', 'Cache-Control': 'private, max-age=3600', 'Access-Control-Allow-Origin': '*' });
+    return new Response(r.body, { status: r.status, headers: h });
+  }
   if (url.pathname === '/moodle' && req.method === 'GET') {
     const k = url.searchParams.get('k') || '';
     if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
