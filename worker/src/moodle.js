@@ -40,14 +40,15 @@ async function ws(token, fn, params) {
 }
 const strip = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#039;|&apos;/g, '’').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 // what a file or activity is, from its name
+export { numOf };
 export function kindOf(name) {
   const n = (name || '').toLowerCase();
-  if (/(corrig|correction|solution|l[öo]sung|corr\.)/.test(n)) return 'correction';
-  if (/(s[ée]rie|exercice|exercise|problem set|homework|devoir|sheet|ubung|übung)/.test(n)) return 'serie';
+  if (/(corrig|correction|solution|l[öo]sung|corr\.|\bsol[_\-\s]?\d|\bsol\b|_sol|-sol|answers?\b)/.test(n)) return 'correction';
+  if (/(s[ée]rie|serie|exercice|exercise|exo|problem set|problems|homework|devoir|sheet|feuille|ubung|übung|\btd\b|\bex[_\-\s]?\d|\bpset)/.test(n)) return 'serie';
   if (/(examen blanc|mock|midterm|exam|examen|quiz|test)/.test(n)) return 'exam';
   return 'other';
 }
-const numOf = name => { const m = /(?:s[ée]rie|serie|exercice|exercise|sheet|week|semaine|set)\s*n?[°o.]?\s*(\d{1,2})/i.exec(name || '') || /\b(\d{1,2})\b/.exec(name || ''); return m ? +m[1] : null; };
+const numOf = name => { const m = /(?:s[ée]rie|serie|exercices?|exercises?|exos?|sheet|week|semaine|set|feuille|td|ex|sol|corrig[ée]|solutions?)[\s_\-]*n?[°o.]?[\s_\-]*0?(\d{1,2})(?!\d)/i.exec(name || '') || /(?:^|[^\d])0?(\d{1,2})(?!\d)/.exec((name || '').replace(/[A-Z]{2,5}-\d{3}/g, '')); return m ? +m[1] : null; };
 
 export async function readApi(token) {
   const site = await ws(token, 'core_webservice_get_site_info');

@@ -505,7 +505,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}${mdBlockLinks(e)}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}${mdBlockLinks(e, key)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -711,7 +711,7 @@ function moodleSet() {
   return `<div class="status"><b>${err ? 'Moodle : problème de lecture' : 'Moodle connecté'}</b>${err ? esc(err) + '. Reconnecte avec un nouveau lien.' : up.length + ' échéance' + (up.length > 1 ? 's' : '') + ' à venir' + (when ? ' · mis à jour à ' + fmt(when.getHours() * 60 + when.getMinutes()) : '')}</div>
     <button type="button" class="li" data-act="mdMap"><span class="bd"><span class="ti">Cours ↔ matières</span><span class="su">${mdUnmapped().length ? mdUnmapped().length + ' cours pas encore reliés' : 'Tous les cours sont reliés'}</span></span>${CHEV}</button>
     <button type="button" class="li" data-act="mdKey"><span class="bd"><span class="ti">${moodle && moodle.ok && moodle.ok.api ? 'Séries, corrigés et annonces : actifs' : 'Tout automatiser'}</span><span class="su">${moodle && moodle.ok && moodle.ok.api ? (moodle.courses || []).length + ' cours suivis · touche pour gérer la clé' : (moodle && moodle.errors && moodle.errors.api ? esc(moodle.errors.api) : 'Nouvelles séries, corrigés et annonces, avec la clé Moodle')}</span></span>${CHEV}</button>
-    ${mdApi() ? `<button type="button" class="li" data-act="mdDocsPick"><span class="bd"><span class="ti">Documents des cours</span><span class="su">Séries, corrigés, slides… à ouvrir directement</span></span>${CHEV}</button>` : ''}
+    ${mdApi() ? `<button type="button" class="li" data-act="mdDocsPick"><span class="bd"><span class="ti">Documents des cours</span><span class="su">${(() => { const it = (moodle.items || []).filter(i => i.file); return it.length + ' fichiers · ' + it.filter(i => i.kind === 'serie').length + ' séries · ' + it.filter(i => i.kind === 'correction').length + ' corrigés reconnus'; })()}</span></span>${CHEV}</button>` : ''}
     <div class="btns"><button type="button" class="btn" data-act="mdRefresh">Actualiser</button><button type="button" class="btn" data-act="mdConnect">Changer le lien</button><button type="button" class="btn" data-act="mdOff">Déconnecter</button></div>`;
 }
 
@@ -774,17 +774,26 @@ const mdApi = () => !!(state.moodleOn && moodle && moodle.ok && moodle.ok.api);
 const mdFileUrl = u => WORKER + '/moodle/file?k=' + syncKey() + '&u=' + encodeURIComponent(u);
 function mdOpen(u) { const w = window.open(mdFileUrl(u), '_blank'); if (!w) location.href = mdFileUrl(u); }
 function mdFiles(subj) { return mdApi() ? (moodle.items || []).filter(i => i.file && mdCourseSubj(i.course) === subj) : []; }
-function mdFileFor(e) {
-  if (e.kind !== 'study' || !e.subj || !(e.serie || e.corr)) return null;
-  const n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0), kind = e.corr ? 'correction' : 'serie';
-  return mdFiles(e.subj).find(i => i.kind === kind && (!n || i.num === n)) || null;
+// the file for a série / correction block: same number, else the one published around that week
+function mdPick(subj, kind, n, wk) {
+  const fs = mdFiles(subj).filter(i => i.kind === kind);
+  const byNum = n ? fs.find(i => i.num === n) : null; if (byNum) return byNum;
+  if (!wk) return null;
+  const a = fromIso(wk).getTime() - 7 * 864e5, b = fromIso(wk).getTime() + 7 * 864e5;
+  return fs.find(i => i.time >= a && i.time < b) || null;
 }
-function mdBlockLinks(e) {
-  if (!mdApi()) return '';
-  const out = [];
-  const f = mdFileFor(e); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
-  if (e.corr && e.subj) { const n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0); const sf = mdFiles(e.subj).find(i => i.kind === 'serie' && (!n || i.num === n)); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Énoncé</button>`); }
-  if ((e.kind === 'course' || (e.kind === 'study' && !e.serie && !e.corr)) && e.subj && mdFiles(e.subj).length) out.push(`<button type="button" class="linkbtn mini" data-act="mdDocs" data-v="${esc(e.subj)}">Documents du cours</button>`);
+function mdFileFor(e, wk) {
+  if (e.kind !== 'study' || !e.subj || !(e.serie || e.corr)) return null;
+  const n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0);
+  return mdPick(e.subj, e.corr ? 'correction' : 'serie', n, wk);
+}
+function mdBlockLinks(e, wk) {
+  if (!mdApi() || !e.subj) return '';
+  const out = [], n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0);
+  const f = mdFileFor(e, wk); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
+  if (e.corr) { const sf = mdPick(e.subj, 'serie', n, wk); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Énoncé</button>`); }
+  const study = e.kind === 'study' || e.kind === 'course';
+  if (study && mdFiles(e.subj).length && (!f || e.kind === 'course' || !(e.serie || e.corr))) out.push(`<button type="button" class="linkbtn mini" data-act="mdDocs" data-v="${esc(e.subj)}">Documents du cours</button>`);
   return out.length ? `<div class="md-links">${out.join('')}</div>` : '';
 }
 function mdDocsSheet(subj) {
