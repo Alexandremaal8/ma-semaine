@@ -55,3 +55,20 @@ console.log('moodle OK');
   assert.equal(nn('a8f3e9b2c1d4e5f6a7b8_scan.pdf'), 'Scan');
   console.log('moodle names OK');
 }
+{
+  const { createRequire } = await import('module'); const L = createRequire(import.meta.url)('../site/logic.js');
+  const ref = new Date(2026, 10, 10, 9);
+  const P = (a, b) => L.parseAnnounce(a, b, ref);
+  assert.deepEqual(P('Examen blanc', 'L’examen blanc aura lieu le mercredi 25 novembre de 8h15 à 10h en CO1.'), { kind: 'mock', type: '', date: '2026-11-25', start: 495, end: 600 });
+  assert.deepEqual(P('Midterm', 'on November 27th, 2:15pm-4pm in CE1'), { kind: 'mock', type: '', date: '2026-11-27', start: 855, end: 960 });
+  assert.equal(P('Pas de cours jeudi', 'Il n’y aura pas de séance d’exercices ce jeudi.').date, '2026-11-12');
+  assert.equal(P('Info', 'Le cours du 12.11 est annulé.').type, 'Cours');
+  assert.equal(P('Exam date', 'The final exam is on January 26, 2027 at 9:00.').date, '2027-01-26');
+  assert.equal(P('Bonne semaine', 'Voici les slides du cours 5.'), null);
+  // a cancelled session disappears from the plan
+  const S = L.defaultState(); const ws = L.mondayOf(new Date(2026, 10, 9));
+  S.cancel = [{ date: '2026-11-11', subj: 'phy', type: 'Exercices' }];
+  const wed = L.generate(L.normalize(S), ws, new Date(2026, 10, 9, 6))[2].ev.filter(e => e.kind === 'course');
+  assert.ok(!wed.some(e => e.subj === 'phy') && wed.some(e => e.subj === 'ana'));
+  console.log('moodle announce OK');
+}

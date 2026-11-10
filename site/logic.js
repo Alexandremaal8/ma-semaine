@@ -132,7 +132,7 @@ function defaultState() {
       R(6, 540, 780, 'Lessive, nettoyage, cuisine'),
       R(6, 1215, 1260, 'Préparer la semaine (sac, lunch, cours de lundi)')
     ],
-    events: [], offDays: [], trips: [], mocks: [], backlog: [], rolled: {}, weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
+    events: [], offDays: [], trips: [], mocks: [], backlog: [], cancel: [], rolled: {}, weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
     modes: clone(MODE_DEFAULTS),
     notif: { on: false, course: 10, stretch: true, move: true, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
     done: {}
@@ -188,7 +188,7 @@ function normalize(s) {
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
   out.notif = Object.assign({}, d.notif, out.notif || {});
   out.done = out.done || {};
-  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
+  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog', 'cancel'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
   if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
   if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
@@ -256,7 +256,8 @@ function layoutDay(S, m, weekStart, d) {
   }
   const off = (S.offDays || []).includes(dIso);
   const dayMocks = (S.mocks || []).filter(x => x.date === dIso && x.end > x.start);
-  let courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start).map(c => Object.assign({}, c)) : [];
+  const canc = (S.cancel || []).filter(x => x.date === dIso);
+  let courses = S.coursesOn ? S.courses.filter(c => c.day === d && c.end > c.start && !canc.some(x => x.subj === c.subj && (!x.type || x.type === c.type))).map(c => Object.assign({}, c)) : [];
   // a mock exam or one of your events during a course takes the place of that part of the course
   const dayEvents = (S.events || []).filter(x => x.date === dIso && x.end > x.start);
   for (const mk of dayMocks.concat(dayEvents)) {
@@ -899,6 +900,46 @@ function moodleTokens(text) {
   return [...new Set(outs.map(o => o.slice(35, 67)).filter(t => /^[0-9a-f]{32}$/.test(t)))].slice(0, 8);
 }
 
-const API = { moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+
+/* ---------- reading a Moodle announcement: what it is about and when ---------- */
+const MONTHS_RE = [['janvier','janv','january','jan'],['fevrier','fevr','fev','february','feb'],['mars','march','mar'],['avril','avr','april','apr'],['mai','may'],['juin','june','jun'],['juillet','juil','july','jul'],['aout','august','aug'],['septembre','sept','sep','september'],['octobre','oct','october'],['novembre','nov','november'],['decembre','dec','december']];
+const WD_RE = [['dimanche','sunday','sun'],['lundi','monday','mon'],['mardi','tuesday','tue','tues'],['mercredi','wednesday','wed'],['jeudi','thursday','thu','thur','thurs'],['vendredi','friday','fri'],['samedi','saturday','sat']];
+const plain = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’`]/g, "'");
+function monthOf(w) { w = w.replace(/\.$/, ''); for (let i = 0; i < 12; i++) if (MONTHS_RE[i].includes(w)) return i; return -1; }
+function parseAnnounce(title, text, ref) {
+  const t = plain(title + ' . ' + text), r = new Date(ref || Date.now());
+  let kind = null, type = '';
+  if (/(examen blanc|exam(en)? blanc|mock|midterm|mi-semestre|test blanc|practice exam|partiel)/.test(t)) kind = 'mock';
+  else if (/(pas de cours|cours (est |sera )?annule|no (lecture|class|course)|lecture (is )?cancel|cancelled|annule|pas de seance|no exercise session|pas d'exercices|no exercises|seance .{0,20}annulee)/.test(t)) {
+    kind = 'cancel'; type = /(exerc|seance d'ex|exercise|ta session|tutorial)/.test(t) ? 'Exercices' : /(cours|lecture|class)/.test(t) ? 'Cours' : '';
+  } else if (/(examen final|final exam|exam(en)? (de |du |of )?(session|janvier|january|fevrier|february)|date de l'examen|exam date)/.test(t)) kind = 'exam';
+  if (!kind) return null;
+  const found = [];
+  const fix = (y, mo, d) => { if (mo < 0 || mo > 11 || d < 1 || d > 31) return null; let yy = y || r.getFullYear(); let dt = new Date(yy, mo, d); if (!y && dt < addDays(r, -60)) dt = new Date(yy + 1, mo, d); if (dt.getMonth() !== mo) return null; return dt; };
+  let m;
+  const mw = MONTHS_RE.flat().sort((a, b) => b.length - a.length).join('|');
+  const reA = new RegExp('(\\d{1,2})(?:er|st|nd|rd|th)?\\s+(?:of\\s+)?(' + mw + ')\\.?(?:\\s+(20\\d\\d))?(?![a-z])', 'g');
+  while ((m = reA.exec(t))) { const d = fix(m[3] ? +m[3] : 0, monthOf(m[2]), +m[1]); if (d) found.push({ d, at: m.index }); }
+  const reB = new RegExp('(?<![a-z])(' + mw + ')\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(20\\d\\d))?(?!\\d)', 'g');
+  while ((m = reB.exec(t))) { const d = fix(m[3] ? +m[3] : 0, monthOf(m[1]), +m[2]); if (d) found.push({ d, at: m.index }); }
+  const reC = /(?<![\d.:,])(\d{1,2})[./](\d{1,2})(?:[./](\d{2}|\d{4}))?(?![\d:h])/g;
+  while ((m = reC.exec(t))) { const y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : 0; const d = fix(y, +m[2] - 1, +m[1]); if (d) found.push({ d, at: m.index }); }
+  if (!found.length) {
+    const rel = /(demain|tomorrow)/.exec(t); if (rel) found.push({ d: addDays(new Date(r.getFullYear(), r.getMonth(), r.getDate()), 1), at: rel.index });
+    else { const wd = new RegExp('(?:ce |this |next |prochain )?(' + WD_RE.flat().join('|') + ')(?![a-z])').exec(t); if (wd) { const k = WD_RE.findIndex(x => x.includes(wd[1])); let d = new Date(r.getFullYear(), r.getMonth(), r.getDate()); let n = (k - d.getDay() + 7) % 7 || 7; if (/next|prochain/.test(wd[0]) && n < 7) n += 7 * (/(next|prochain)/.test(wd[0]) && n <= 2 ? 0 : 0); found.push({ d: addDays(d, n), at: wd.index }); } }
+  }
+  if (!found.length) return { kind, type, date: null };
+  found.sort((a, b) => a.at - b.at);
+  const first = found.find(f => f.d >= addDays(new Date(r.getFullYear(), r.getMonth(), r.getDate()), 0)) || found[0];
+  // a time near the date: 8h15, 08:15, 8:15 am, de 8h à 10h, 8:15-10:00
+  const near = t.slice(Math.max(0, first.at - 80), first.at + 140);
+  const tm = /(\d{1,2})\s*(?:h|:)\s*(\d{2})?\s*(am|pm)?(?:\s*(?:-|–|a|to|jusqu'a|until)\s*(\d{1,2})\s*(?:h|:)?\s*(\d{2})?\s*(am|pm)?)?/.exec(near.replace(/(\d{1,2})[./](\d{1,2})[./]?(\d{2,4})?/g, ' '));
+  let start = null, end = null;
+  const mm = (h, mi, ap) => { h = +h; mi = +(mi || 0); if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; return h >= 6 && h <= 22 && mi < 60 ? h * 60 + mi : null; };
+  if (tm) { start = mm(tm[1], tm[2], tm[3] || tm[6]); if (tm[4]) end = mm(tm[4], tm[5], tm[6]); if (end != null && start != null && end <= start) end = null; }
+  return { kind, type, date: iso(first.d), start, end };
+}
+
+const API = { parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

@@ -650,17 +650,17 @@ function mdEvents() {
     if (!m) { out.push({ ...e }); continue; }
     const base = m[1], k = e.course + '|' + base, isOpen = /open|ouvr/i.test(m[2]);
     if (isOpen) { const x = { ...e, title: base, end: e.end, opens: true }; open[k] = x; out.push(x); }
-    else if (open[k] && e.start - open[k].start < 14 * 864e5) { open[k].end = e.start; open[k].uid = open[k].uid + '+'; delete open[k].opens; delete open[k]; }
+    else if (open[k] && e.start - open[k].start < 14 * 864e5) { open[k].end = e.start; open[k].uid = open[k].uid + '+'; if (e.todo) open[k].todo = true; delete open[k].opens; delete open[k]; }
     else out.push({ ...e, title: base, closes: true });
   }
-  return out.map(e => { const k = mdKind(e.title); return { ...e, subj: mdSubj(e.course, e.title), kind: e.closes && k === 'event' ? 'due' : k, date: iso(new Date(e.start)) }; });
+  return out.map(e => { let k = mdKind(e.title); if (e.closes && k === 'event') k = 'due'; return { ...e, subj: mdSubj(e.course, e.title), kind: k, date: iso(new Date(e.start)), dueAt: e.end > e.start ? e.end : e.start }; });
 }
 async function mdFetch(force) {
   if (!WORKER || !syncKey() || !state.moodleOn) return;
   if (!force && moodle && Date.now() - (moodle.fetched || 0) < 30 * 60e3) return;
   try {
     const d = await fetch(WORKER + '/moodle?k=' + syncKey() + (force ? '&force=1' : '')).then(r => r.json());
-    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); mdApply(); keepScroll(renderAll); }
+    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); mdApply(); mdAutoDone(); keepScroll(renderAll); }
     return d;
   } catch (e) { return null; }
 }
@@ -711,6 +711,7 @@ function moodleSet() {
   return `<div class="status"><b>${err ? 'Moodle : problème de lecture' : 'Moodle connecté'}</b>${err ? esc(err) + '. Reconnecte avec un nouveau lien.' : up.length + ' échéance' + (up.length > 1 ? 's' : '') + ' à venir' + (when ? ' · mis à jour à ' + fmt(when.getHours() * 60 + when.getMinutes()) : '')}</div>
     <button type="button" class="li" data-act="mdMap"><span class="bd"><span class="ti">Cours ↔ matières</span><span class="su">${mdUnmapped().length ? mdUnmapped().length + ' cours pas encore reliés' : 'Tous les cours sont reliés'}</span></span>${CHEV}</button>
     <button type="button" class="li" data-act="mdKey"><span class="bd"><span class="ti">${moodle && moodle.ok && moodle.ok.api ? 'Séries, corrigés et annonces : actifs' : 'Tout automatiser'}</span><span class="su">${moodle && moodle.ok && moodle.ok.api ? (moodle.courses || []).length + ' cours suivis · touche pour gérer la clé' : (moodle && moodle.errors && moodle.errors.api ? esc(moodle.errors.api) : 'Nouvelles séries, corrigés et annonces, avec la clé Moodle')}</span></span>${CHEV}</button>
+    ${mdApi() ? `<button type="button" class="li" data-act="mdAnnList"><span class="bd"><span class="ti">Annonces des cours</span><span class="su">${(moodle.announcements || []).length} annonces ces 45 derniers jours</span></span>${CHEV}</button>` : ''}
     ${mdApi() ? `<button type="button" class="li" data-act="mdDocsPick"><span class="bd"><span class="ti">Documents des cours</span><span class="su">${(() => { const it = (moodle.items || []).filter(i => i.file); return it.length + ' fichiers · ' + it.filter(i => i.kind === 'serie').length + ' séries · ' + it.filter(i => i.kind === 'correction').length + ' corrigés reconnus'; })()}</span></span>${CHEV}</button>` : ''}
     <div class="btns"><button type="button" class="btn" data-act="mdRefresh">Actualiser</button><button type="button" class="btn" data-act="mdConnect">Changer le lien</button><button type="button" class="btn" data-act="mdOff">Déconnecter</button></div>`;
 }
@@ -725,7 +726,7 @@ function mdFeed() {
   if (!moodle || !moodle.ok || !moodle.ok.api) return [];
   const since = Date.now() - 4 * 864e5, dis = state.dismiss || {};
   const items = (moodle.items || []).filter(i => i.time > since).map(i => ({ file: i.file, id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: mdName(i), tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Doc', url: i.url }));
-  const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.text, tag: 'Annonce' }));
+  const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.text, tag: 'Annonce', annId: annKey(a) }));
   return items.concat(ann).filter(x => !dis['mf:' + x.id]).sort((a, b) => b.t - a.t).slice(0, 5);
 }
 // a corrigé published earlier than planned moves the correction forward, automatically
@@ -746,7 +747,7 @@ function mdApply() {
 function mdFeedCard() {
   const f = mdFeed(); if (!f.length) return '';
   const ago = t => { const h = Math.round((Date.now() - t) / 3600e3); return h < 1 ? 'à l’instant' : h < 24 ? 'il y a ' + h + ' h' : 'il y a ' + Math.round(h / 24) + ' j'; };
-  return `<div class="sec-t">Nouveautés Moodle</div><div class="group">${f.map(x => { const su = x.subj ? subjOf(state, x.subj) : null; return `<div class="li" style="--c:${su ? esc(su.color) : '#F98012'}"${x.file ? ` data-act="mdOpen" data-v="${esc(x.file)}" role="button" tabindex="0"` : ''}><span class="dt"></span><span class="bd"><span class="ti">${deacc(x.title).startsWith(deacc(x.tag)) ? '' : `<span class="tag cu" style="margin:0 6px 0 0">${x.tag}</span>`}${esc(x.title)}</span><span class="su">${esc(su ? su.name : 'Moodle')} · ${ago(x.t)}${x.file ? ' · touche pour ouvrir' : ''}${x.text ? ' · ' + esc(x.text.slice(0, 110)) + (x.text.length > 110 ? '…' : '') : ''}</span></span><button type="button" class="linkbtn mini" style="margin:0" data-act="dismiss" data-v="mf:${esc(x.id)}" aria-label="Masquer">OK</button></div>`; }).join('')}</div>`;
+  return `<div class="sec-t">Nouveautés Moodle</div><div class="group">${f.map(x => { const su = x.subj ? subjOf(state, x.subj) : null; return `<div class="li" style="--c:${su ? esc(su.color) : '#F98012'}"${x.file ? ` data-act="mdOpen" data-v="${esc(x.file)}" role="button" tabindex="0"` : x.annId != null ? ` data-act="mdAnn" data-v="${esc(x.annId)}" role="button" tabindex="0"` : ''}><span class="dt"></span><span class="bd"><span class="ti">${deacc(x.title).startsWith(deacc(x.tag)) ? '' : `<span class="tag cu" style="margin:0 6px 0 0">${x.tag}</span>`}${esc(x.title)}</span><span class="su">${esc(su ? su.name : 'Moodle')} · ${ago(x.t)}${x.file ? ' · touche pour ouvrir' : x.annId != null ? ' · touche pour lire' : ''}${x.text ? ' · ' + esc(x.text.slice(0, 110)) + (x.text.length > 110 ? '…' : '') : ''}</span></span><button type="button" class="linkbtn mini" style="margin:0" data-act="dismiss" data-v="mf:${esc(x.id)}" aria-label="Masquer">OK</button></div>`; }).join('')}</div>`;
 }
 function moodleKeySheet() {
   const L1 = 'https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https';
@@ -762,7 +763,7 @@ function moodleKeySheet() {
       const b = $('#shBody .btn.pri'); if (b) { b.disabled = true; b.textContent = 'Vérification…'; }
       const d = await post('/moodle', { k: syncKey(), tokens: toks }).then(r => r.json()).catch(() => null);
       if (!d || d.error || !d.ok || !d.ok.api) { if (b) { b.disabled = false; b.textContent = 'Activer'; } toast(d ? (d.error || (d.errors && d.errors.api) || 'Moodle a refusé la clé') : 'Serveur injoignable, réessaie'); return; }
-      d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); closeSheet(); mdApply(); renderAll();
+      d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); closeSheet(); mdApply(); mdAutoDone(); renderAll();
       showCard('Moodle entièrement relié', (d.user ? 'Salut ' + d.user + ' ! ' : '') + (d.courses || []).length + ' cours suivis : séries, corrigés et annonces arrivent maintenant dans l’app.');
     })();
     return false;
@@ -830,23 +831,71 @@ function mdTodayCard() {
 function mdProposal() {
   const dis = state.dismiss || {}, now = Date.now();
   for (const e of mdEvents()) {
-    if (!e.subj || e.start < now || dis['md:' + e.uid]) continue;
+    if (!e.subj || (e.kind === 'due' ? e.dueAt : e.start) < now || dis['md:' + e.uid]) continue;
     const su = subjOf(state, e.subj); if (!su) continue;
     const ign = `<button type="button" class="btn" data-act="dismiss" data-v="md:${esc(e.uid)}">Ignorer</button>`;
     if (e.kind === 'exam' && e.start < now + 150 * 864e5 && su.exam !== e.date)
       return `<div class="prop"><b>Moodle : examen ${esc(de(su.name))}, le ${mdLong(e)}</b><p>« ${esc(e.title)} ». ${su.exam ? 'Tu avais noté le ' + dateLbl(fromIso(su.exam)) + '. ' : ''}Je l’utilise pour le mode Exam et les révisions ?</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdExam" data-v="${esc(e.uid)}">Ajouter</button>${ign}</div></div>`;
     if (e.kind === 'mock' && e.start < now + 60 * 864e5 && !(state.mocks || []).some(m => m.subj === e.subj && m.date === e.date))
       return `<div class="prop"><b>Moodle : examen blanc ${esc(de(su.name))}</b><p style="margin-bottom:0">Le ${mdLong(e)}.</p><p>Je l’ajoute ? La séance d’exercices de ce jour-là est remplacée, et tu as une révision avant.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdMock" data-v="${esc(e.uid)}">Ajouter</button>${ign}</div></div>`;
-    if (e.kind === 'due' && e.start < now + 7 * 864e5 && !(state.backlog || []).some(b => b.mdUid === e.uid))
-      return `<div class="prop"><b>${esc(su.name)} : ${esc(e.title)}</b><p>À rendre au plus tard ${mdLong(e)}. Je le cale dans ton planning avant ?</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdDue" data-v="${esc(e.uid)}" data-m="60">1h</button><button type="button" class="btn" data-act="mdDue" data-v="${esc(e.uid)}" data-m="30">30 min</button><button type="button" class="btn" data-act="mdDue" data-v="${esc(e.uid)}" data-m="120">2h</button>${ign}</div></div>`;
+    if (e.kind === 'due' && e.dueAt < now + 7 * 864e5 && !(moodle.actionOk && !e.todo) && !(state.backlog || []).some(b => b.mdUid === e.uid))
+      return `<div class="prop"><b>${esc(su.name)} : ${esc(e.title)}</b><p>À rendre au plus tard ${mdLong({ start: e.dueAt })}. Je le cale dans ton planning avant ?</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="mdDue" data-v="${esc(e.uid)}" data-m="60">1h</button><button type="button" class="btn" data-act="mdDue" data-v="${esc(e.uid)}" data-m="30">30 min</button><button type="button" class="btn" data-act="mdDue" data-v="${esc(e.uid)}" data-m="120">2h</button>${ign}</div></div>`;
+  }
+  // dates found in announcements (mock exams, exams, cancelled sessions)
+  for (const an of mdApi() ? moodle.announcements || [] : []) {
+    if (dis['ma:' + annKey(an)]) continue;
+    const subj = mdCourseSubj(an.course), su = subj && subjOf(state, subj); if (!su) continue;
+    const p = L.parseAnnounce(an.title, an.text, an.posted || an.time); if (!p || !p.date || fromIso(p.date) < fromIso(todayIso())) continue;
+    const when = dateLbl(fromIso(p.date)) + (p.start != null ? ' à ' + fmt(p.start) + (p.end ? '–' + fmt(p.end) : '') : '');
+    const btns = (main, label) => `<div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="${main}" data-v="${esc(annKey(an))}">${label}</button><button type="button" class="btn" data-act="mdAnn" data-v="${esc(annKey(an))}">Lire l’annonce</button><button type="button" class="btn" data-act="dismiss" data-v="ma:${esc(annKey(an))}">Ignorer</button></div>`;
+    if (p.kind === 'mock' && !(state.mocks || []).some(m => m.subj === subj && m.date === p.date))
+      return `<div class="prop"><b>Annonce : examen blanc ${esc(de(su.name))}</b><p>« ${esc(an.title)} » · ${when}${p.start == null ? ' (heure à vérifier)' : ''}. Je l’ajoute au planning, avec la révision avant ?</p>${btns('maMock', 'Ajouter')}</div>`;
+    if (p.kind === 'exam' && su.exam !== p.date && fromIso(p.date) < addDays(new Date(), 150))
+      return `<div class="prop"><b>Annonce : examen ${esc(de(su.name))} le ${dateLbl(fromIso(p.date))}</b><p>« ${esc(an.title)} ». ${su.exam ? 'Tu avais noté le ' + dateLbl(fromIso(su.exam)) + '. ' : ''}Je l’utilise pour le mode Exam et les révisions ?</p>${btns('maExam', 'Ajouter')}</div>`;
+    if (p.kind === 'cancel' && !(state.cancel || []).some(c => c.subj === subj && c.date === p.date) && state.courses.some(c => c.subj === subj && c.day === dow(fromIso(p.date)) && (!p.type || c.type === p.type)))
+      return `<div class="prop"><b>Annonce : pas ${p.type === 'Exercices' ? 'd’exercices' : 'de cours'} ${esc(de(su.name))} le ${dateLbl(fromIso(p.date))}</b><p>« ${esc(an.title)} ». Je libère ce créneau dans ton planning ?</p>${btns('maCancel', 'Libérer')}</div>`;
   }
   return '';
+}
+// things already done on Moodle (quiz taken, homework submitted) leave your backlog by themselves
+function mdAutoDone() {
+  if (!mdApi() || !moodle.actionOk) return;
+  const evs = mdEvents(), now = Date.now(), gone = [];
+  for (const b of state.backlog || []) {
+    if (!b.mdUid || b.done) continue;
+    const e = evs.find(x => x.uid === b.mdUid);
+    if (e && !e.todo && e.dueAt > now + 3600e3) { if (!gone.length) beginChange(); b.done = true; b.doneAt = now; b.mdAuto = true; gone.push(b.title); }
+  }
+  if (gone.length) { save(); renderAll(); endChange('Fait sur Moodle', gone.join(', ') + ' : retiré de ton retard. Annulable dans l’onglet Retard.'); }
+}
+const annKey = an => an.course + ':' + an.id;
+const annFind = k => ((moodle && moodle.announcements) || []).find(a => annKey(a) === String(k));
+function mdAnnSheet(id) {
+  const an = annFind(id); if (!an) return;
+  const subj = mdCourseSubj(an.course), su = subj && subjOf(state, subj), d = new Date(an.time);
+  openSheet(an.title, `<p class="hint" style="margin:-4px 0 12px;padding:0">${esc(su ? su.name : 'Moodle')} · ${dateLbl(d)} ${fmt(d.getHours() * 60 + d.getMinutes())}${an.author ? ' · ' + esc(an.author) : ''}</p><div class="ann-text">${esc(an.text || '')}</div><div class="sh-actions"><a class="btn" href="https://moodle.epfl.ch/mod/forum/discuss.php?d=${encodeURIComponent(an.id)}" target="_blank" rel="noopener">Ouvrir sur Moodle</a></div>`, () => true);
+}
+function mdAnnList() {
+  const as = (moodle && moodle.announcements) || [];
+  if (!as.length) { toast('Aucune annonce ces 45 derniers jours'); return; }
+  openSheet('Annonces des cours', `<div class="group">${as.map(an => { const subj = mdCourseSubj(an.course), su = subj && subjOf(state, subj); return `<button type="button" class="li" style="--c:${su ? esc(su.color) : '#F98012'}" data-act="mdAnn" data-v="${esc(annKey(an))}"><span class="dt"></span><span class="bd"><span class="ti">${esc(an.title)}</span><span class="su">${esc(su ? su.name : 'Moodle')} · ${dateLbl(new Date(an.time))}</span></span>${CHEV}</button>`; }).join('')}</div>`, () => true);
 }
 function mdAction(a, v, b) {
   if (a === 'mdConnect') { moodleConnect(); return true; }
   if (a === 'mdMap') { moodleMapSheet(); return true; }
   if (a === 'mdKey') { moodleKeySheet(); return true; }
   if (a === 'mdOpen') { mdOpen(v); return true; }
+  if (a === 'mdAnn') { mdAnnSheet(v); return true; }
+  if (a === 'mdAnnList') { mdAnnList(); return true; }
+  if (a === 'maMock' || a === 'maExam' || a === 'maCancel') {
+    const an = annFind(v); if (!an) return true;
+    const subj = mdCourseSubj(an.course), p = L.parseAnnounce(an.title, an.text, an.posted || an.time); if (!subj || !p || !p.date) return true;
+    beginChange();
+    if (a === 'maMock') { const s0 = p.start != null ? p.start : 495; state.mocks.push({ id: uid(), subj, date: p.date, start: s0, end: p.end != null ? p.end : s0 + 105, place: '' }); }
+    if (a === 'maExam') { const su = subjOf(state, subj); if (su) su.exam = p.date; }
+    if (a === 'maCancel') { state.cancel = state.cancel || []; state.cancel.push({ date: p.date, subj, type: p.type || '' }); }
+    done(); return true;
+  }
   if (a === 'mdDocs') { mdDocsSheet(v); return true; }
   if (a === 'mdRename') { mdRename(v, b.dataset.s); return true; }
   if (a === 'mdDocsPick') { mdDocsPick(); return true; }
@@ -1134,7 +1183,7 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
   if (MUTATING.has(a)) beginChange();
-  if (a.startsWith('md') && a !== 'msDone' && mdAction(a, v, b)) return;
+  if (/^m[ad][A-Z]/.test(a) && mdAction(a, v, b)) return;
   switch (a) {
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); done(); return; }
     case 'closeSheet': closeSheet(); return;

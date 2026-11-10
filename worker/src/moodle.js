@@ -38,6 +38,7 @@ async function ws(token, fn, params) {
   if (j && j.exception) { const e = new Error(j.message || j.errorcode || 'Moodle error'); e.code = j.errorcode; throw e; }
   return j;
 }
+const stripLines = h => String(h || '').replace(/<\s*br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h\d)>/gi, '\n').replace(/<li[^>]*>/gi, '• ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#039;|&apos;/g, '’').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 const strip = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#039;|&apos;/g, '’').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 // what a file or activity is, from its name
 export { numOf };
@@ -82,27 +83,28 @@ export async function readApi(token) {
     const forums = await ws(token, 'mod_forum_get_forums_by_courses', Object.fromEntries(courses.slice(0, 15).map((c, i) => ['courseids[' + i + ']', c.id])));
     for (const f of (forums || []).filter(f => f.type === 'news').slice(0, 15)) {
       try {
-        const d = await ws(token, 'mod_forum_get_forum_discussions', { forumid: f.id, sortorder: 1, page: 0, perpage: 5 });
+        const d = await ws(token, 'mod_forum_get_forum_discussions', { forumid: f.id, sortorder: 1, page: 0, perpage: 10 });
         for (const x of (d.discussions || [])) {
           const t = (x.timemodified || x.created || 0) * 1000;
-          if (t < Date.now() - 21 * 864e5) continue;
-          announcements.push({ course: f.course, title: strip(x.name || x.subject).slice(0, 160), text: strip(x.message).slice(0, 400), time: t });
+          if (t < Date.now() - 45 * 864e5) continue;
+          announcements.push({ id: x.discussion || x.id, course: f.course, title: strip(x.name || x.subject).slice(0, 160), text: stripLines(x.message).slice(0, 2500), time: t, posted: (x.created || x.timemodified || 0) * 1000, author: strip(x.userfullname || '').slice(0, 60) });
         }
       } catch (e) { }
     }
   } catch (e) { }
   // upcoming events (deadlines, quizzes) for the next 70 days
-  let events = [];
+  let events = [], actionOk = false;
   try {
     const ev = await ws(token, 'core_calendar_get_action_events_by_timesort', { timesortfrom: Math.floor(now - 86400), timesortto: Math.floor(now + 70 * 86400), limitnum: 50 });
-    events = (ev.events || []).map(e => ({ uid: 'api-' + e.id, title: strip(e.name).slice(0, 160), course: e.course ? e.course.fullname : '', courseId: e.course ? e.course.id : null, start: (e.timestart || e.timesort) * 1000, end: ((e.timestart || e.timesort) + (e.timeduration || 0)) * 1000, src: 'api', url: e.url || '' }));
+    events = (ev.events || []).map(e => ({ uid: 'api-' + e.id, title: strip(e.name).slice(0, 160), course: e.course ? e.course.fullname : '', courseId: e.course ? e.course.id : null, start: (e.timestart || e.timesort) * 1000, end: ((e.timestart || e.timesort) + (e.timeduration || 0)) * 1000, src: 'api', url: e.url || '', todo: true }));
+    actionOk = true;
   } catch (e) { }
   return {
     user: (site.firstname || '').slice(0, 40),
     courses: courses.slice(0, 15).map(c => ({ id: c.id, name: strip(c.fullname).slice(0, 120), short: strip(c.shortname).slice(0, 60) })),
     items: items.sort((a, b) => b.time - a.time).slice(0, 400),
-    announcements: announcements.sort((a, b) => b.time - a.time).slice(0, 30),
-    events
+    announcements: announcements.sort((a, b) => b.time - a.time).slice(0, 60),
+    events, actionOk
   };
 }
 
@@ -154,7 +156,9 @@ export async function refreshMoodle(env, k, force) {
       const a = await readApi(cfg.token);
       Object.assign(dig, { user: a.user, courses: a.courses, items: a.items, announcements: a.announcements });
       // API events complete the iCal ones (same deadline may come from both: keep one)
-      for (const e of a.events) if (!dig.events.some(x => Math.abs(x.start - e.start) < 60e3 && x.title === e.title)) dig.events.push(e);
+      // events still waiting for you on Moodle (not submitted / not completed) are marked "todo"
+      for (const e of a.events) { const same = dig.events.find(x => Math.abs(x.start - e.start) < 60e3 && x.title === e.title); if (same) same.todo = true; else dig.events.push(e); }
+      dig.actionOk = a.actionOk;
       dig.ok.api = true;
     } catch (e) { dig.errors.api = e.code === 'invalidtoken' ? 'Clé refusée par Moodle (expirée ou mal copiée)' : String(e.message || e); }
   }

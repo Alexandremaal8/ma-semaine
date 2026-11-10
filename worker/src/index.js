@@ -176,7 +176,7 @@ async function moodleTick(env) {
       const cname = id => ((dig.courses || []).find(c => c.id === id) || {}).short || '';
       const fresh = [
         ...(dig.items || []).filter(i => !seen.has(i.title + i.time) && i.time > old.at - 3600e3).map(i => ({ title: (i.kind === 'correction' ? 'Corrigé dispo' : i.kind === 'serie' ? 'Nouvelle série' : 'Nouveau document') + (cname(i.course) ? ' · ' + cname(i.course) : ''), body: i.nice || i.title })),
-        ...(dig.announcements || []).filter(a => !seen.has(a.title + a.time) && a.time > old.at - 3600e3).map(a => ({ title: 'Annonce' + (cname(a.course) ? ' · ' + cname(a.course) : ''), body: a.title })),
+        ...(dig.announcements || []).filter(a => !seen.has(a.title + a.time) && a.time > old.at - 3600e3).map(a => ({ title: 'Annonce' + (cname(a.course) ? ' · ' + cname(a.course) : ''), body: a.title + (a.text ? ' — ' + a.text.slice(0, 140) + (a.text.length > 140 ? '…' : '') : '') })),
         ...(dig.events || []).filter(e => !oldEv.has(e.uid) && e.start > Date.now() && e.start < Date.now() + 30 * 864e5).map(e => ({ title: 'Nouveau sur Moodle' + (e.course ? ' · ' + e.course : ''), body: e.title + ' · ' + new Date(e.start).toLocaleDateString('fr-CH', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Zurich' }) + ' — ouvre l’app pour le caser' }))
       ].slice(0, 3);
       if (!fresh.length) continue;
