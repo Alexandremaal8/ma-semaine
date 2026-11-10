@@ -179,6 +179,21 @@ function editCourse(id) {
     return done();
   });
 }
+function editWeekly(id) {
+  const t = (state.weekly || []).find(x => x.id === id) || { id: null, subj: (state.subjects[0] || {}).id, title: '', minutes: 60, before: 2 };
+  openSheet(t.id ? 'Modifier la tâche' : 'Nouvelle tâche de la semaine', `<div class="fields">
+    ${F.text('title', 'Quoi', t.title, 'full', 'ex. MOOC de prog')}
+    ${F.select('subj', 'Matière', subjOpts(), t.subj)}
+    ${F.num('minutes', 'Durée (min)', t.minutes, 'min="15" max="600" step="15"')}
+    ${F.select('before', 'À finir avant', [[1, 'Mardi'], [2, 'Mercredi'], [3, 'Jeudi'], [4, 'Vendredi'], [5, 'Samedi'], [6, 'Dimanche'], [7, 'Fin de semaine']], t.before)}
+  </div><p class="hint" style="margin-top:10px">L’app la place chaque semaine dans tes premiers créneaux libres avant ce jour, et la redécale si tu la rates.</p>${actions(!!t.id)}`, (fd, btn) => {
+    const others = (state.weekly || []).filter(x => x.id !== t.id);
+    if (isDel(btn)) { state.weekly = others; return done(); }
+    const title = String(fd.title || '').trim() || 'Tâche';
+    state.weekly = others.concat([{ id: t.id || uid(), subj: fd.subj, title, minutes: Math.max(15, +fd.minutes || 60), before: +fd.before }]);
+    return done();
+  });
+}
 function editRoutine(id) {
   const r = state.routines.find(x => x.id === id) || { id: null, day: 5, start: 600, end: 660, title: '', kind: 'other' };
   openSheet(r.id ? 'Modifier la routine' : 'Nouvelle routine', `<div class="fields">
@@ -1073,6 +1088,8 @@ function renderWeek() {
     <div class="group">${courseRows || '<div class="empty">Aucun cours.</div>'}</div>
     <div class="sec-t">Matières<button type="button" data-act="editSubject">+ Matière</button></div>
     <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${s.serie ? 'Série ' + hm(s.serie) + (s.corr ? ' + correction ' + hm(s.corr) : '') : 'Pas de série'} · ${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
+    <div class="sec-t">Tâches de la semaine<button type="button" data-act="editWeekly">+ Tâche</button></div>
+    <div class="group">${(state.weekly || []).map(t => `<button type="button" class="li" data-act="editWeekly" data-v="${t.id}" style="--c:${esc((subjOf(state, t.subj) || {}).color || 'var(--faint)')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(t.title)}</span><span class="su">${hm(t.minutes)} chaque semaine · avant ${t.before >= 7 ? 'la fin de semaine' : DAYS[t.before].toLowerCase()}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune tâche.</div>'}</div>
     <div class="sec-t">Routines<button type="button" data-act="editRoutine">+ Routine</button></div>
     ${(() => { const sp = L.sportMinutes(state); const ok = sp >= L.SPORT_MIN && sp <= L.SPORT_MAX; return `<p class="hint" style="margin:0 4px 8px;${ok ? '' : 'color:var(--warn);font-weight:650'}">Sport : ${hm(sp)} par semaine ${ok ? '(entre 2h et 3h, parfait)' : '· il faut entre 2h et 3h'}</p>`; })()}
     <div class="group">${state.routines.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(r => `<button type="button" class="li" data-act="editRoutine" data-v="${r.id}" style="--c:${r.kind === 'sport' ? 'var(--ink)' : 'var(--faint)'}"><span class="dt"></span><span class="bd"><span class="ti">${esc(r.title)}</span><span class="su">${DAYS[r.day]}${r.kind === 'sport' ? ' · sport' : r.kind === 'study' ? ' · étude ' + esc((subjOf(state, r.subj) || {}).name || '') : ''}</span></span><span class="rt">${fmt(r.start)}<br>${fmt(r.end)}</span>${CHEV}</button>`).join('') || '<div class="empty">Aucune routine.</div>'}</div>`;
@@ -1293,6 +1310,7 @@ document.addEventListener('click', async e => {
     case 'editExam': editExam(v); return;
     case 'editCourse': editCourse(v); return;
     case 'editRoutine': editRoutine(v); return;
+    case 'editWeekly': editWeekly(v); return;
     case 'editSubject': editSubject(v); return;
     case 'notifOn': enableNotifs(); return;
     case 'notifOff': disableNotifs(); return;
