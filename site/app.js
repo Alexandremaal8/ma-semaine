@@ -454,8 +454,8 @@ function renderToday() {
     const nxt = main.find(e => e.start > mins && !MINOR.has(e.kind));
     if (cur) {
       const p = Math.round((mins - cur.start) / (cur.end - cur.start) * 100);
-      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}</div><div class="s">${esc(cur.sub || '')}</div><div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}</b></span></div>` : ''}</div>`;
-    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}</div></div>`;
+      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div><div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}</b></span></div>` : ''}</div>`;
+    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}${roomBtn(nxt)}</div></div>`;
     else hero = `<div class="hero quiet"><div class="k">C’est fini pour aujourd’hui</div><div class="t">Bonne soirée</div><div class="s">Au lit vers ${fmt(day.sleep)}.</div></div>`;
   }
   let late = '';
@@ -505,7 +505,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}${mdBlockLinks(e, key)}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}${e.kind === 'course' && !e.room ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${mdBlockLinks(e, key)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -615,6 +615,15 @@ function proposal(ws, key, M, wmode) {
   }
   // 3. things found on Moodle
   return mdProposal();
+}
+
+/* ---------- course rooms ---------- */
+const baseCid = id => String(id || '').replace(/-b$/, '');
+function roomBtn(e, inCard) { return e && e.kind === 'course' && !e.room && e.cid ? `${inCard ? '' : ' '}<button type="button" class="linkbtn mini${inCard ? '' : ' on-hero'}" data-act="roomAdd" data-v="${esc(baseCid(e.cid))}">+ salle</button>` : ''; }
+function roomSheet(cid) {
+  const c = state.courses.find(x => x.id === cid); if (!c) return;
+  const su = subjOf(state, c.subj);
+  openSheet('Salle · ' + (su ? su.name : 'Cours'), `<p class="hint" style="margin:-4px 0 12px;padding:0">${esc(c.type)} du ${DAYS[c.day].toLowerCase()} ${fmt(c.start)}–${fmt(c.end)}. Elle sera affichée chaque semaine.</p><div class="fields">${F.text('room', 'Salle', c.room || '', 'full', 'ex. CE 1 6')}</div><div class="sh-actions"><button type="submit" class="btn pri">Enregistrer</button></div>`, fd => { c.room = String(fd.room || '').trim().slice(0, 40); save(); renderAll(); endChange('Salle enregistrée', (su ? su.name + ' · ' : '') + (c.room || 'aucune salle') + ', chaque ' + DAYS[c.day].toLowerCase() + '.'); return true; });
 }
 
 /* ---------- Moodle (lien calendrier) ---------- */
@@ -1185,6 +1194,7 @@ document.addEventListener('click', async e => {
   if (MUTATING.has(a)) beginChange();
   if (/^m[ad][A-Z]/.test(a) && mdAction(a, v, b)) return;
   switch (a) {
+    case 'roomAdd': roomSheet(v); return;
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;

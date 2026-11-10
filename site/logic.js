@@ -278,7 +278,7 @@ function layoutDay(S, m, weekStart, d) {
   const busy = () => ev.filter(e => e.end > e.start);
   const free = (s, e) => busy().every(b => b.end <= s || b.start >= e);
   ev.push({ kind: 'stretch', start: wake, end: wake + 5, title: 'Stretching · 5 min', sub: STRETCH[d].name });
-  courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id }); });
+  courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id, room: c.room || '' }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
   S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
   dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
