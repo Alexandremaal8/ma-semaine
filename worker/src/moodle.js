@@ -117,7 +117,7 @@ export function niceName(raw, kind, num) {
     if (t === t.toUpperCase() && /[A-Z]{4}/.test(t)) t = t.toLowerCase();
     t = t.replace(/[A-Z]{2,5}-?\d{3}(\([a-z]{1,3}\))?/gi, ' ')
       .replace(/(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})/g, ' ')
-      .replace(/\s+[-–]+\s+/g, ' – ').replace(/[_+]+|(?<=[a-z\d])-(?=[a-z\d])|^-+/gi, ' ')
+      .replace(/\s+[-–]+\s+/g, ' – ').replace(/[_+]+|(?<=[a-z\d])-(?=[a-z\d])|(?:^|\s)-+/gi, ' ')
       .replace(/\b(19|20)\d{2}\b/g, ' ')
       .replace(/\b(v\d+|final|finale?|copy|copie|draft|new|updated?|rev\d*)\b/gi, ' ')
       .replace(/\(\d\)/g, ' ')
