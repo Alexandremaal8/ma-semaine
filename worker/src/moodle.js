@@ -65,13 +65,14 @@ export async function readApi(token) {
         const name = strip(mod.name), base = { course: c.id, section: strip(sec.name).slice(0, 80), url: (mod.url || '').slice(0, 300) };
         if (!files.length) {
           const t = mod.added || 0; if (!t || t < now - 150 * 86400) continue;
-          items.push({ ...base, title: name.slice(0, 160), time: t * 1000, kind: kindOf(name), num: numOf(name) });
+          items.push({ ...base, title: name.slice(0, 160), nice: niceName(name, kindOf(name), numOf(name)), time: t * 1000, kind: kindOf(name), num: numOf(name) });
           continue;
         }
         for (const f of files) {
           const t = f.timemodified || f.timecreated || mod.added || 0; if (!t || t < now - 150 * 86400) continue;
           const label = files.length === 1 ? name : name + ' · ' + strip(f.filename).replace(/\.pdf$/i, '');
-          items.push({ ...base, title: label.slice(0, 160), time: t * 1000, kind: kindOf(name + ' ' + f.filename), num: numOf(name + ' ' + f.filename), file: f.fileurl.slice(0, 400), mime: (f.mimetype || '').slice(0, 60) });
+          const kind = kindOf(name + ' ' + f.filename), num = numOf(name + ' ' + f.filename);
+          items.push({ ...base, title: label.slice(0, 160), nice: niceName(label, kind, num), time: t * 1000, kind, num, file: f.fileurl.slice(0, 400), mime: (f.mimetype || '').slice(0, 60) });
         }
       }
     } catch (e) { /* one course failing must not break the others */ }
@@ -103,6 +104,34 @@ export async function readApi(token) {
     announcements: announcements.sort((a, b) => b.time - a.time).slice(0, 30),
     events
   };
+}
+
+
+/* a readable name for a course file: "MATH101_sol_ex09_v2_final.pdf" → "Corrigé série 9" */
+const WORDS = { lecture: 'Cours', lect: 'Cours', lec: 'Cours', cours: 'Cours', week: 'Semaine', wk: 'Semaine', sem: 'Semaine', chapter: 'Chapitre', chap: 'Chapitre', ch: 'Chapitre', notes: 'Notes', summary: 'Résumé', slides: 'Slides', handout: 'Polycopié', poly: 'Polycopié', exam: 'Examen', midterm: 'Examen blanc', mock: 'Examen blanc', quiz: 'Quiz', tutorial: 'Tutoriel', lab: 'TP', tp: 'TP', appendix: 'Annexe', annex: 'Annexe', intro: 'Introduction' };
+export function niceName(raw, kind, num) {
+  if (kind === 'serie' && num) return 'Série ' + num;
+  if (kind === 'correction' && num) return 'Corrigé série ' + num;
+  const clean = part => {
+    let t = String(part || '').replace(/\.[a-z0-9]{2,5}$/i, '');
+    if (t === t.toUpperCase() && /[A-Z]{4}/.test(t)) t = t.toLowerCase();
+    t = t.replace(/[A-Z]{2,5}-?\d{3}(\([a-z]{1,3}\))?/gi, ' ')
+      .replace(/(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})/g, ' ')
+      .replace(/\s+[-–]+\s+/g, ' – ').replace(/[_+]+|(?<=[a-z\d])-(?=[a-z\d])|^-+/gi, ' ')
+      .replace(/\b(19|20)\d{2}\b/g, ' ')
+      .replace(/\b(v\d+|final|finale?|copy|copie|draft|new|updated?|rev\d*)\b/gi, ' ')
+      .replace(/\(\d\)/g, ' ')
+      .replace(/\b(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{12,}\b/gi, ' ')
+      .replace(/([a-z])(\d)/gi, '$1 $2').replace(/(\d)([a-z]{3,})/gi, '$1 $2')
+      .replace(/\b0+(\d)/g, '$1')
+      .replace(/\s+/g, ' ').trim();
+    t = t.split(' ').map(w => WORDS[w.toLowerCase()] || w).join(' ');
+    return t ? t[0].toUpperCase() + t.slice(1) : '';
+  };
+  const parts = String(raw || '').split(' · ').map(clean).filter(Boolean);
+  for (let i = 1; i < parts.length; i++) { const prev = parts[i - 1].toLowerCase(); if (parts[i].toLowerCase().startsWith(prev + ' ')) parts[i] = parts[i].slice(prev.length + 1); }
+  const out = parts.map(p => p.replace(/^–\s*|\s*–$/g, '')).filter((p, i) => p && !parts.slice(0, i).some(q => q.toLowerCase() === p.toLowerCase())).join(' · ');
+  return (out || String(raw || '')).slice(0, 120);
 }
 
 const KEY_RE = /^[a-f0-9]{32,64}$/;
@@ -142,7 +171,9 @@ export async function moodleRoute(req, env, url, json) {
     const [cfg, dig] = await Promise.all([env.KV.get('mcfg:' + k, 'json'), env.KV.get('mdig:' + k, 'json')]);
     if (!cfg || !cfg.token || !dig || !(dig.items || []).some(i => i.file === u) || !u.startsWith(BASE + '/webservice/pluginfile.php/')) return new Response('Fichier introuvable', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
     const r = await fetch(u + (u.includes('?') ? '&' : '?') + 'token=' + cfg.token, { headers: UA });
-    const h = new Headers({ 'Content-Type': r.headers.get('Content-Type') || 'application/pdf', 'Content-Disposition': 'inline', 'Cache-Control': 'private, max-age=3600', 'Access-Control-Allow-Origin': '*' });
+    const it = dig.items.find(i => i.file === u), ext = (/\.([a-z0-9]{2,5})(?:\?|$)/i.exec(u) || [, 'pdf'])[1];
+    const fname = (String(url.searchParams.get('n') || (it && it.nice) || 'document').replace(/[\\/:*?"<>|\n\r]+/g, ' ').trim().slice(0, 100) || 'document') + '.' + ext;
+    const h = new Headers({ 'Content-Type': r.headers.get('Content-Type') || 'application/pdf', 'Content-Disposition': "inline; filename*=UTF-8''" + encodeURIComponent(fname), 'Cache-Control': 'private, max-age=3600', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Disposition' });
     return new Response(r.body, { status: r.status, headers: h });
   }
   if (url.pathname === '/moodle' && req.method === 'GET') {

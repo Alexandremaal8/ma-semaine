@@ -47,3 +47,11 @@ console.log('moodle OK');
   assert.ok(L.moodleTokens('https://token=' + b).includes(tok)); assert.ok(L.moodleTokens('https://token=' + b.toLowerCase()).includes(tok)); assert.deepEqual(L.moodleTokens('nope'), []);
   console.log('moodle launch OK');
 }
+{
+  const { niceName, kindOf: k, numOf: n } = await import('../worker/src/moodle.js');
+  const nn = x => niceName(x, k(x), n(x));
+  assert.equal(nn('MATH101_sol_ex09_v2_final.pdf'), 'Corrigé série 9');
+  assert.equal(nn('CS101-Chap4-Graphs (1).pdf'), 'Chapitre 4 Graphs');
+  assert.equal(nn('a8f3e9b2c1d4e5f6a7b8_scan.pdf'), 'Scan');
+  console.log('moodle names OK');
+}

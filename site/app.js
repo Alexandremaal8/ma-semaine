@@ -724,7 +724,7 @@ function mdCourseSubj(id) {
 function mdFeed() {
   if (!moodle || !moodle.ok || !moodle.ok.api) return [];
   const since = Date.now() - 4 * 864e5, dis = state.dismiss || {};
-  const items = (moodle.items || []).filter(i => i.time > since).map(i => ({ file: i.file, id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: i.title, tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Doc', url: i.url }));
+  const items = (moodle.items || []).filter(i => i.time > since).map(i => ({ file: i.file, id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: mdName(i), tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Doc', url: i.url }));
   const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.text, tag: 'Annonce' }));
   return items.concat(ann).filter(x => !dis['mf:' + x.id]).sort((a, b) => b.t - a.t).slice(0, 5);
 }
@@ -771,7 +771,8 @@ function moodleKeySheet() {
 
 /* opening course files (PDF) through the saved Moodle key */
 const mdApi = () => !!(state.moodleOn && moodle && moodle.ok && moodle.ok.api);
-const mdFileUrl = u => WORKER + '/moodle/file?k=' + syncKey() + '&u=' + encodeURIComponent(u);
+const mdName = i => ((state.mdNames || {})[i.file] || i.nice || i.title);
+const mdFileUrl = u => { const it = ((moodle && moodle.items) || []).find(i => i.file === u); return WORKER + '/moodle/file?k=' + syncKey() + '&u=' + encodeURIComponent(u) + (it ? '&n=' + encodeURIComponent(mdName(it)) : ''); };
 function mdOpen(u) { const w = window.open(mdFileUrl(u), '_blank'); if (!w) location.href = mdFileUrl(u); }
 function mdFiles(subj) { return mdApi() ? (moodle.items || []).filter(i => i.file && mdCourseSubj(i.course) === subj) : []; }
 // the file for a série / correction block: same number, else the one published around that week
@@ -800,9 +801,18 @@ function mdDocsSheet(subj) {
   const su = subjOf(state, subj), fs = mdFiles(subj);
   if (!fs.length) { toast('Aucun document trouvé pour ce cours'); return; }
   const lbl = { serie: 'Série', correction: 'Corrigé', exam: 'Examen' };
-  const rows = fs.slice(0, 80).map(i => `<button type="button" class="li" data-act="mdOpen" data-v="${esc(i.file)}"><span class="bd"><span class="ti">${lbl[i.kind] && !deacc(i.title).startsWith(deacc(lbl[i.kind])) ? `<span class="tag cu" style="margin:0 6px 0 0">${lbl[i.kind]}</span>` : ''}${esc(i.title)}</span><span class="su">${esc(i.section || '')}${i.section ? ' · ' : ''}${dateLbl(new Date(i.time))}</span></span>${CHEV}</button>`).join('');
-  openSheet('Documents · ' + (su ? su.name : ''), `<div class="group">${rows}</div>`, () => true);
+  const rows = fs.slice(0, 80).map(i => { const nm = mdName(i), orig = i.title !== nm; return `<div class="li doc"><button type="button" class="doc-open" data-act="mdOpen" data-v="${esc(i.file)}"><span class="bd"><span class="ti">${lbl[i.kind] && !deacc(nm).startsWith(deacc(lbl[i.kind])) ? `<span class="tag cu" style="margin:0 6px 0 0">${lbl[i.kind]}</span>` : ''}${esc(nm)}</span><span class="su">${esc(i.section || '')}${i.section ? ' · ' : ''}${dateLbl(new Date(i.time))}${orig ? ' · <i>' + esc(i.title) + '</i>' : ''}</span></span></button><button type="button" class="doc-ren" data-act="mdRename" data-v="${esc(i.file)}" data-s="${esc(subj)}" aria-label="Renommer">✎</button></div>`; }).join('');
+  openSheet('Documents · ' + (su ? su.name : ''), `<p class="hint" style="margin:-4px 0 10px;padding:0">Noms remis au propre automatiquement (le nom d’origine est en petit). Touche ✎ pour renommer.</p><div class="group">${rows}</div>`, () => true);
   const f = $('#shBody .sh-actions'); if (f) f.remove();
+}
+function mdRename(file, subj) {
+  const it = ((moodle && moodle.items) || []).find(i => i.file === file); if (!it) return;
+  openSheet('Renommer', `<p class="hint" style="margin:-4px 0 10px;padding:0">Nom d’origine : <i>${esc(it.title)}</i>. Le fichier ne change pas, seulement le nom affiché.</p><div class="fields">${F.text('nm', 'Nom', mdName(it), 'full')}</div><div class="sh-actions">${(state.mdNames || {})[file] ? '<button type="submit" class="btn danger" value="delete">Nom automatique</button>' : ''}<button type="submit" class="btn pri" value="save">Enregistrer</button></div>`, (fd, btn) => {
+    state.mdNames = state.mdNames || {};
+    const v = String(fd.nm || '').trim().slice(0, 120);
+    if (isDel(btn) || !v || v === it.nice) delete state.mdNames[file]; else state.mdNames[file] = v;
+    save(); setTimeout(() => mdDocsSheet(subj), 350); return true;
+  });
 }
 function mdDocsPick() {
   const subs = state.subjects.filter(su => mdFiles(su.id).length);
@@ -838,6 +848,7 @@ function mdAction(a, v, b) {
   if (a === 'mdKey') { moodleKeySheet(); return true; }
   if (a === 'mdOpen') { mdOpen(v); return true; }
   if (a === 'mdDocs') { mdDocsSheet(v); return true; }
+  if (a === 'mdRename') { mdRename(v, b.dataset.s); return true; }
   if (a === 'mdDocsPick') { mdDocsPick(); return true; }
   if (a === 'mdCopyLaunch') { copyText('https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https', 'Lien copié : colle-le dans Safari'); return true; }
   if (a === 'mdRefresh') { mdFetch(true).then(d => toast(d && !d.error ? 'Moodle à jour' : 'Moodle injoignable pour l’instant')); return true; }
