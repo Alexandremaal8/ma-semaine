@@ -179,6 +179,44 @@ function editCourse(id) {
     return done();
   });
 }
+function editProject(id) {
+  const p = (state.projects || []).find(x => x.id === id) || { id: null, subj: (state.subjects[0] || {}).id, title: '', from: todayIso(), to: '', hours: 15, group: true, sessions: [] };
+  const sess = (p.sessions || []).map((ss, i) => `<button type="button" class="li" data-act="editSession" data-v="${esc(p.id || '')}" data-i="${i}"><span class="bd"><span class="ti">${ss.weekly ? 'Chaque ' + DAYS[dow(fromIso(ss.date))].toLowerCase() : dateLbl(fromIso(ss.date))} · ${fmt(ss.start)}–${fmt(ss.end)}</span><span class="su">${ss.weekly ? 'dès le ' + dateLbl(fromIso(ss.date)) : 'une fois'}${ss.place ? ' · ' + esc(ss.place) : ''}</span></span>${CHEV}</button>`).join('');
+  openSheet(p.id ? p.title : 'Nouveau projet', `<div class="fields">
+    ${F.text('title', 'Nom', p.title, 'full', 'ex. Mini-projet 2')}
+    ${F.select('subj', 'Matière', subjOpts(), p.subj)}
+    ${F.date('from', 'Début', p.from, '')}${F.date('to', 'À rendre le', p.to, '')}
+    ${F.num('hours', 'Heures de travail en tout (environ)', p.hours, 'min="1" max="200" step="1"', 'full')}
+  </div>
+  ${p.id ? `<div class="sec-t" style="margin:16px 0 6px">Séances en binôme<button type="button" data-act="editSession" data-v="${esc(p.id)}" data-i="-1">+ Séance</button></div><div class="group">${sess || '<div class="empty">Ajoute vos créneaux communs : ils sont bloqués dans ton planning et comptent dans les heures du projet.</div>'}</div>` : ''}
+  <p class="hint" style="margin-top:10px">L’app répartit les heures restantes jusqu’au rendu, chaque semaine, sans jamais prendre le temps de tes séries. Ce n’est pas un examen : pas de mode Exam pour ça.</p>${actions(!!p.id)}`, (fd, btn) => {
+    const others = (state.projects || []).filter(x => x.id !== p.id);
+    if (isDel(btn)) { state.projects = others; return done(); }
+    if (!fd.from || !fd.to || fd.to < fd.from) { toast('Choisis un début et une date de rendu après le début'); return false; }
+    const obj = { id: p.id || uid(), subj: fd.subj, title: String(fd.title || '').trim() || 'Projet', from: fd.from, to: fd.to, hours: Math.max(1, +fd.hours || 10), group: true, sessions: p.sessions || [] };
+    state.projects = others.concat([obj]);
+    const su = subjOf(state, obj.subj);
+    if (su && su.exam && su.exam >= obj.from && su.exam <= obj.to) su.exam = '';   // the project replaces a placeholder "exam" date
+    const isNew = !p.id; done(); if (isNew) setTimeout(() => editProject(obj.id), 400); return true;
+  });
+}
+function editSession(pid, i) {
+  const p = (state.projects || []).find(x => x.id === pid); if (!p) return;
+  const ss = p.sessions[i] || { date: p.from > todayIso() ? p.from : todayIso(), start: 1035, end: 1140, weekly: true, place: '' };
+  openSheet('Séance en binôme', `<div class="fields">
+    ${F.date('date', i >= 0 && ss.weekly ? 'À partir du' : 'Jour', ss.date)}
+    ${F.time('start', 'Début', ss.start)}${F.time('end', 'Fin', ss.end)}
+    ${F.seg('weekly', 'Répéter', [['1', 'Chaque semaine'], ['0', 'Une fois']], ss.weekly ? '1' : '0')}
+    ${F.text('place', 'Où (facultatif)', ss.place || '', 'full', 'ex. BC 07')}
+  </div><p class="hint" style="margin-top:10px">Chaque semaine : jusqu’au rendu (${dateLbl(fromIso(p.to))}).</p>${actions(i >= 0)}`, (fd, btn) => {
+    if (isDel(btn)) { p.sessions.splice(i, 1); done(); setTimeout(() => editProject(pid), 400); return true; }
+    const t = timesOk(fd); if (!t) return false;
+    if (!fd.date) { toast('Choisis un jour'); return false; }
+    const obj = { date: fd.date, start: t[0], end: t[1], weekly: fd.weekly === '1', place: String(fd.place || '').trim() };
+    if (i >= 0) p.sessions[i] = obj; else p.sessions.push(obj);
+    done(); setTimeout(() => editProject(pid), 400); return true;
+  });
+}
 function editWeekly(id) {
   const t = (state.weekly || []).find(x => x.id === id) || { id: null, subj: (state.subjects[0] || {}).id, title: '', minutes: 60, before: 2 };
   openSheet(t.id ? 'Modifier la tâche' : 'Nouvelle tâche de la semaine', `<div class="fields">
@@ -1081,6 +1119,7 @@ function renderWeek() {
       const today = todayIso(), up = [];
       (state.trips || []).filter(t => t.to >= today).forEach(t => up.push([t.from, `<button type="button" class="li" data-act="editTrip" data-v="${esc(t.id)}" style="--c:#0F766E"><span class="dt"></span><span class="bd"><span class="ti">${esc(t.title)}</span><span class="su">Voyage · du ${dateLbl(fromIso(t.from))} au ${dateLbl(fromIso(t.to))}</span></span>${CHEV}</button>`]));
       (state.mocks || []).filter(t => t.date >= today).forEach(t => { const su = subjOf(state, t.subj); up.push([t.date, `<button type="button" class="li" data-act="editMock" data-v="${esc(t.id)}" style="--c:#DB2777"><span class="dt"></span><span class="bd"><span class="ti">Examen blanc · ${esc(su ? su.name : '')}</span><span class="su">${longDate(fromIso(t.date))} · ${fmt(t.start)}</span></span>${CHEV}</button>`]); });
+      (state.projects || []).filter(p => p.to >= today).forEach(p => { const su = subjOf(state, p.subj); up.push([p.from > today ? p.from : p.to, `<button type="button" class="li" data-act="editProject" data-v="${esc(p.id)}" style="--c:${esc((su || {}).color || 'var(--faint)')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(p.title)}</span><span class="su">${p.from > today ? 'commence le ' + dateLbl(fromIso(p.from)) + ' · ' : ''}à rendre le ${dateLbl(fromIso(p.to))}</span></span>${CHEV}</button>`]); });
       state.subjects.filter(su => su.exam && su.exam >= today).forEach(su => up.push([su.exam, `<button type="button" class="li" data-act="editExam" data-v="${esc(su.id)}" style="--c:var(--exam)"><span class="dt"></span><span class="bd"><span class="ti">Examen · ${esc(su.name)}</span><span class="su">${longDate(fromIso(su.exam))}</span></span>${CHEV}</button>`]));
       return up.length ? `<div class="sec-t" style="margin-top:18px">À venir</div><div class="group">${up.sort((a, b) => a[0].localeCompare(b[0])).map(x => x[1]).join('')}</div>` : '';
     })()}
@@ -1088,6 +1127,8 @@ function renderWeek() {
     <div class="group">${courseRows || '<div class="empty">Aucun cours.</div>'}</div>
     <div class="sec-t">Matières<button type="button" data-act="editSubject">+ Matière</button></div>
     <div class="group">${state.subjects.map(s => `<button type="button" class="li" data-act="editSubject" data-v="${esc(s.id)}" style="--c:${esc(s.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s.name)}</span><span class="su">${s.serie ? 'Série ' + hm(s.serie) + (s.corr ? ' + correction ' + hm(s.corr) : '') : 'Pas de série'} · ${prioL[s.prio] || ''}${s.exam ? ' · examen le ' + dateLbl(fromIso(s.exam)) : ''}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune matière.</div>'}</div>
+    <div class="sec-t">Projets<button type="button" data-act="editProject">+ Projet</button></div>
+    <div class="group">${(state.projects || []).map(p => { const su = subjOf(state, p.subj); const n = (p.sessions || []).length; return `<button type="button" class="li" data-act="editProject" data-v="${p.id}" style="--c:${esc((su || {}).color || 'var(--faint)')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(p.title)}</span><span class="su">${dateLbl(fromIso(p.from))} → ${dateLbl(fromIso(p.to))} · ~${p.hours}h · ${n ? n + ' séance' + (n > 1 ? 's' : '') + ' en binôme' : 'aucune séance en binôme'}</span></span>${CHEV}</button>`; }).join('') || '<div class="empty">Aucun projet. Un projet sur plusieurs semaines (à rendre) : l’app répartit les heures jusqu’au rendu.</div>'}</div>
     <div class="sec-t">Tâches de la semaine<button type="button" data-act="editWeekly">+ Tâche</button></div>
     <div class="group">${(state.weekly || []).map(t => `<button type="button" class="li" data-act="editWeekly" data-v="${t.id}" style="--c:${esc((subjOf(state, t.subj) || {}).color || 'var(--faint)')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(t.title)}</span><span class="su">${hm(t.minutes)} chaque semaine · avant ${t.before >= 7 ? 'la fin de semaine' : DAYS[t.before].toLowerCase()}</span></span>${CHEV}</button>`).join('') || '<div class="empty">Aucune tâche.</div>'}</div>
     <div class="sec-t">Routines<button type="button" data-act="editRoutine">+ Routine</button></div>
@@ -1311,6 +1352,8 @@ document.addEventListener('click', async e => {
     case 'editCourse': editCourse(v); return;
     case 'editRoutine': editRoutine(v); return;
     case 'editWeekly': editWeekly(v); return;
+    case 'editProject': editProject(v); return;
+    case 'editSession': editSession(v, +b.dataset.i); return;
     case 'editSubject': editSubject(v); return;
     case 'notifOn': enableNotifs(); return;
     case 'notifOff': disableNotifs(); return;

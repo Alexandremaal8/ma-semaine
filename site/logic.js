@@ -109,7 +109,7 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 9, semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 10, semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -135,7 +135,9 @@ function defaultState() {
     ],
     events: [], offDays: [], trips: [], mocks: [], backlog: [], cancel: [],
     // weekly tasks with a deadline day (0 = Monday): placed by the planner before that day
-    weekly: [{ id: uid(), subj: 'prog', title: 'MOOC de prog · 1re heure', minutes: 60, before: 2 }], rolled: {}, weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
+    weekly: [{ id: uid(), subj: 'prog', title: 'MOOC de prog · 1re heure', minutes: 60, before: 2 }],
+    // projects over several weeks: hours spread until the due date, plus sessions with your partner
+    projects: [], rolled: {}, weekModes: {}, autoModes: {}, autoMode: true, noCourseWeeks: [],
     modes: clone(MODE_DEFAULTS),
     notif: { on: false, course: 10, stretch: true, move: true, study: true, sport: true, routine: true, morning: true, evening: true, deadline: true, event: 15 },
     done: {}
@@ -196,18 +198,26 @@ function normalize(s) {
       if (!Array.isArray(out.weekly)) out.weekly = [{ id: uid(), subj: prog.id, title: 'MOOC de prog · 1re heure', minutes: 60, before: 2 }];
     }
   }
+  if ((old.v || 0) < 10) {
+    // v9 → v10: the prog "exam" of 25 Nov is in fact Mini-projet 2, a group project from 25 Nov to 17 Dec
+    const prog = (out.subjects || []).find(x => x.id === 'prog' || /programm/i.test(x.name));
+    if (prog && prog.exam === '2026-11-25' && !(out.projects || []).length) {
+      prog.exam = '';
+      out.projects = [{ id: uid(), subj: prog.id, title: 'Mini-projet 2', from: '2026-11-25', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
+    }
+  }
   out.modes = Object.assign({}, clone(MODE_DEFAULTS), out.modes || {});
   for (const k of MODE_ORDER) out.modes[k] = Object.assign({}, MODE_DEFAULTS[k], out.modes[k] || {});
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
   out.notif = Object.assign({}, d.notif, out.notif || {});
   out.done = out.done || {};
-  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog', 'cancel', 'weekly'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
+  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog', 'cancel', 'weekly', 'projects'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
   if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
   if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
   if (!out.rolled || typeof out.rolled !== 'object') out.rolled = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
-  out.v = 9;
+  out.v = 10;
   return out;
 }
 
@@ -295,6 +305,12 @@ function layoutDay(S, m, weekStart, d) {
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
   S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
   dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
+  // project sessions with your partner (one date, or every week until the due date)
+  for (const p of S.projects || []) for (const ss of p.sessions || []) {
+    if (!ss.date || !(ss.end > ss.start)) continue;
+    const on = ss.date === dIso || (ss.weekly && dIso > ss.date && dIso <= p.to && dow(fromIso(ss.date)) === d);
+    if (on && free(ss.start, ss.end)) ev.push({ kind: 'fixed', start: ss.start, end: ss.end, title: p.title + ' · en binôme', subj: p.subj, fsub: (subjOf(S, p.subj) || {}).name + (ss.place ? ' · ' + ss.place : ' · avec ton binôme'), pid: p.id });
+  }
   // sport and chores happen at home: never while you are on campus or on the way
   const leaveAt = courses.length ? firstC - COMMUTE - 5 : null;
   const homeAt = courses.length ? (S.mode === 'charbon' ? Math.max(lastC, 1110) : lastC) + COMMUTE : null;
@@ -466,7 +482,24 @@ function generate(S0, weekStart, now) {
     corr[su.id] = c;
     if (v > 0) { must[su.id] = v; mustTotal += v; }
   }
+  // projects: this week's share of the hours still to do (partner sessions count), on top of the usual target
+  const projNeed = p => {
+    if (!p.from || !p.to || !(p.hours > 0)) return null;
+    const pf = fromIso(p.from), pt = fromIso(p.to), we = addDays(weekStart, 7);
+    if (pt < weekStart || pf >= we || (p.subj && !subjOf(S, p.subj))) return null;
+    let prev = 0, soloNow = 0;
+    for (const [wk, recs] of Object.entries(S.done || {})) for (const v of Object.values(recs || {})) {
+      if (!v || typeof v !== 'object' || !String(v.t || '').startsWith(p.title)) continue;
+      if (wk < key) prev += v.m || 0; else if (wk === key && v.t === p.title) soloNow += v.m || 0;
+    }
+    const weeksLeft = Math.max(1, Math.round((mondayOf(pt) - weekStart) / (7 * 864e5)) + 1);
+    let meet = 0; for (const x of days) for (const e of x.ev) if (e.pid === p.id) meet += e.end - e.start;
+    const solo = Math.max(0, Math.round(Math.max(0, p.hours * 60 - prev) / weeksLeft - meet));
+    return { pf, pt, we, solo, left: Math.max(0, solo - soloNow) };
+  };
+  const projExtra = S.mode === 'recup' ? 0 : Math.min(600, (S.projects || []).reduce((a, p) => { const n = projNeed(p); return a + (n ? n.solo : 0); }, 0));
   let T = S.mode === 'recup' ? Math.min(+m.week, mustTotal || +m.week) : Math.max(+m.week, mustTotal ? Math.ceil((mustTotal * 1.1 + 30) / 15) * 15 : 0);
+  T += projExtra;
 
   // trip days only get their light study; the rest of the target shrinks with them
   const tripDays = days.filter(x => x.trip);
@@ -541,10 +574,12 @@ function generate(S0, weekStart, now) {
       let pick = null, kind = null;
       if (prep) {
         // weekly tasks with a deadline go first, in the first free blocks before their day
-        const tk = Object.keys(prep).find(k => prep[k].task && prep[k].left >= 15 && s.date < prep[k].date);
+        const room = t => t.dayCap ? t.dayCap - (t.used[s.d] || 0) : Infinity;
+        const tk = Object.keys(prep).find(k => prep[k].task && prep[k].left >= 15 && s.date < prep[k].date && (!prep[k].from || s.date >= prep[k].from) && room(prep[k]) >= 20);
         if (tk) {
           const t = prep[tk];
-          const parts = Math.ceil(t.left / s.len); let len = Math.min(s.len, Math.max(20, Math.ceil(t.left / parts / 5) * 5));
+          const parts = Math.ceil(t.left / s.len); let len = Math.min(s.len, room(t), Math.max(20, Math.ceil(t.left / parts / 5) * 5));
+          if (t.dayCap) t.used[s.d] = (t.used[s.d] || 0) + len;
           if (len < s.len) { s.end = s.start + len; s.endT = s.startT + len * 6e4; s.len = len; }
           s.title = t.title; s.subj = t.subj; s.task = true; t.left -= s.len;
           if (t.subj) { revLeft[t.subj] = Math.max(0, (revLeft[t.subj] || 0) - s.len); lastByDay[s.d] = t.subj; }
@@ -643,6 +678,12 @@ function generate(S0, weekStart, now) {
       const done = Object.values(doneMapAll).filter(v => v && v.t === t.title).reduce((a, v) => a + (v.m || 0), 0);
       out['task:' + t.id] = { task: true, title: t.title, subj: t.subj || null, date: addDays(weekStart, +t.before), left: Math.max(0, +t.minutes - done) };
     }
+    // a project never takes the time the week's séries need
+    const roomForProjects = Math.max(0, slots.reduce((a, x) => a + x.len, 0) - mustTotal * 1.15 - 30);
+    for (const p of S.projects || []) {
+      const n = projNeed(p); if (!n) continue;
+      out['proj:' + p.id] = { task: true, title: p.title, subj: p.subj || null, from: n.pf, date: new Date(Math.min(addDays(n.pt, 1).getTime(), n.we.getTime())), left: Math.min(n.left, roomForProjects), dayCap: 90, used: {} };
+    }
     return Object.keys(out).length ? out : null;
   };
   const doneMapAll = S.done[key] || {};
@@ -669,7 +710,7 @@ function generate(S0, weekStart, now) {
     const id = idOf(x.d, e), rec = doneMap[id], len = e.end - e.start;
     const startT = x.date.getTime() + e.start * 6e4, endT = x.date.getTime() + e.end * 6e4;
     e.kind = 'study'; e.id = id; e.fixed = true; e.len = len;
-    const su = subjOf(S, e.subj); e.sub = (su ? su.name : '') + ' · tous les ' + DAYS[x.d].toLowerCase() + 's';
+    const su = subjOf(S, e.subj); e.sub = e.fsub || (su ? su.name : '') + ' · tous les ' + DAYS[x.d].toLowerCase() + 's';
     if (rec && typeof rec === 'object') e.state = 'done';
     else if (endT <= nowT) { e.state = endT <= sinceT ? 'pre' : 'missed'; }
     else e.state = 'todo';
