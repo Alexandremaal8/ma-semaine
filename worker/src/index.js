@@ -95,7 +95,9 @@ async function handle(req, env) {
     const t = String(data.token || '');
     if (!/^[a-f0-9]{24,64}$/.test(t)) return json({ error: 'bad token' }, 400);
     const agenda = (Array.isArray(data.agenda) ? data.agenda : []).slice(0, 60).map(x => ({ s: +x.s, e: +x.e, t: String(x.t || '').slice(0, 80), u: String(x.u || '').slice(0, 80), c: String(x.c || '').slice(0, 9), k: String(x.k || '').slice(0, 10) }));
-    await env.KV.put('agenda:' + t, JSON.stringify({ mode: String(data.mode || '').slice(0, 20), agenda, at: Date.now() }), { expirationTtl: 60 * 60 * 24 * 30 });
+    const prev = await env.KV.get('agenda:' + t, 'json'), mode = String(data.mode || '').slice(0, 20);
+    if (!prev || prev.mode !== mode || JSON.stringify(prev.agenda) !== JSON.stringify(agenda) || Date.now() - prev.at > 7 * 864e5)
+      await env.KV.put('agenda:' + t, JSON.stringify({ mode, agenda, at: Date.now() }), { expirationTtl: 60 * 60 * 24 * 30 });
     return json({ ok: true });
   }
   /* synced state between your devices, keyed by a secret code; newest wins */
@@ -105,6 +107,7 @@ async function handle(req, env) {
     if (!data.state || typeof data.state !== 'object' || !Number.isFinite(data.updated)) return json({ error: 'bad state' }, 400);
     const cur = await env.KV.get('store:' + k, 'json');
     if (cur && cur.updated > data.updated) return json({ ok: false, newer: true, updated: cur.updated, state: cur.state });
+    if (cur && cur.updated === data.updated) return json({ ok: true, updated: data.updated, same: true });
     await env.KV.put('store:' + k, JSON.stringify({ updated: data.updated, state: data.state }));
     return json({ ok: true, updated: data.updated });
   }
@@ -116,7 +119,8 @@ async function handle(req, env) {
     const notifications = list.slice(0, 500).filter(n => n && Number.isFinite(n.at)).map(n => ({ at: n.at, title: String(n.title || '').slice(0, 120), body: String(n.body || '').slice(0, 240), tag: String(n.tag || '').slice(0, 60) }));
     const ids = (await env.KV.get('links:' + k, 'json')) || [];
     let n = 0;
-    for (const id of ids) { const rec = await env.KV.get('sub:' + id, 'json'); if (!rec) continue; rec.notifications = notifications; rec.syncedAt = Date.now(); await env.KV.put('sub:' + id, JSON.stringify(rec)); n++; }
+    const same = rec => JSON.stringify(rec.notifications.filter(x => x.at > Date.now())) === JSON.stringify(notifications.filter(x => x.at > Date.now()));
+    for (const id of ids) { const rec = await env.KV.get('sub:' + id, 'json'); if (!rec) continue; n++; if (same(rec)) continue; rec.notifications = notifications; rec.syncedAt = Date.now(); await env.KV.put('sub:' + id, JSON.stringify(rec)); }
     return json({ ok: true, devices: n });
   }
   if (!validSub(data.subscription)) return json({ error: 'bad subscription' }, 400);
@@ -125,7 +129,10 @@ async function handle(req, env) {
   if (url.pathname === '/sync') {
     const list = Array.isArray(data.notifications) ? data.notifications : [];
     const notifications = list.slice(0, 500).filter(n => n && Number.isFinite(n.at)).map(n => ({ at: n.at, title: String(n.title || '').slice(0, 120), body: String(n.body || '').slice(0, 240), tag: String(n.tag || '').slice(0, 60) }));
-    await env.KV.put('sub:' + id, JSON.stringify({ subscription: data.subscription, notifications, syncedAt: Date.now() }));
+    const prev = await env.KV.get('sub:' + id, 'json');
+    const future = l => JSON.stringify(l.filter(x => x.at > Date.now()));
+    if (!prev || JSON.stringify(prev.subscription) !== JSON.stringify(data.subscription) || future(prev.notifications || []) !== future(notifications) || Date.now() - (prev.syncedAt || 0) > 7 * 864e5)
+      await env.KV.put('sub:' + id, JSON.stringify({ subscription: data.subscription, notifications, syncedAt: Date.now() }));
     if (data.backup && typeof data.backup === 'object') await env.KV.put('backup:' + id, JSON.stringify(data.backup).slice(0, 180000));
     const subs = await index(env);
     if (!subs.includes(id)) { subs.push(id); while (subs.length > 20) subs.shift(); await env.KV.put('subs', JSON.stringify(subs)); }

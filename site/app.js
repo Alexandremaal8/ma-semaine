@@ -59,9 +59,11 @@ async function pull(force) {
 }
 async function pushState() {
   const k = syncKey(); if (!WORKER || !k) return;
+  const upd = localUpdated() || Date.now();
+  if (lsGet(LS + '-pushed') === k + ':' + upd) return;   // nothing new since the last send
   try {
     const r = await (await fetch(WORKER + '/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ k, updated: localUpdated() || Date.now(), state }) })).json();
-    if (r && r.newer) await pull(true);
+    if (r && r.newer) await pull(true); else if (r && r.ok) lsSet(LS + '-pushed', k + ':' + upd);
   } catch (e) { console.warn('push', e); }
 }
 const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
@@ -80,21 +82,29 @@ async function getSub() {
   return reg.pushManager ? reg.pushManager.getSubscription() : null;
 }
 const post = (path, body) => fetch(WORKER + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+// sends a thing only if it changed (or after `maxMin` minutes), to stay well under the server's daily write quota
+function sigOf(x) { const t = JSON.stringify(x); let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return t.length + ':' + h; }
+function onceFor(name, payload, maxMin) {
+  const key = LS + '-sent-' + name, sig = sigOf(payload), prev = (lsGet(key) || '').split('|');
+  if (prev[0] === sig && Date.now() - +prev[1] < maxMin * 60e3) return false;
+  lsSet(key, sig + '|' + Date.now()); return true;
+}
 async function syncAll() {
   if (!WORKER) return;
   if (syncKey() && !pulling) await pushState();
   try {
-    if (state.widgetToken) await post('/agenda', { token: state.widgetToken, mode: MODE_META[cfgOf(iso(mondayOf(new Date()))).mode].name, agenda: L.buildAgenda(state, new Date(), 3) });
+    if (state.widgetToken) { const body = { token: state.widgetToken, mode: MODE_META[cfgOf(iso(mondayOf(new Date()))).mode].name, agenda: L.buildAgenda(state, new Date(), 3) }; if (onceFor('agenda', body, 30)) await post('/agenda', body); }
   } catch (e) { console.warn('agenda', e); }
   const sub = state.notif.on ? await getSub().catch(() => null) : null;
   if (!sub) {
     // this device has no reminders (e.g. your PC): refresh the reminders of your other devices
-    if (syncKey()) post('/notifs', { k: syncKey(), notifications: L.buildNotifications(state, new Date(), 14) }).catch(() => { });
+    if (syncKey()) { const notifications = L.buildNotifications(state, new Date(), 14); if (onceFor('notifs', notifications, 360)) post('/notifs', { k: syncKey(), notifications }).catch(() => { }); }
     return;
   }
   try {
     const notifications = L.buildNotifications(state, new Date(), 14);
-    const r = await post('/sync', { subscription: sub.toJSON(), notifications, backup: state, syncKey: syncKey() || undefined });
+    if (!onceFor('sync', { e: sub.endpoint, notifications, k: syncKey() }, 360)) return;
+    const r = await post('/sync', { subscription: sub.toJSON(), notifications, backup: onceFor('backup', 1, 1440) ? state : undefined, syncKey: syncKey() || undefined });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     localStorage.setItem(LS + '-sync', JSON.stringify({ t: Date.now(), n: notifications.length }));
     if (tab === 'set') renderSet();
@@ -1014,11 +1024,11 @@ function renderBacklog() {
 /* End of a week: unfinished séries go to the backlog by themselves */
 function rollover() {
   const cur = mondayOf(new Date()), sinceWs = mondayOf(new Date(state.since || Date.now()));
-  const added = [];
+  const added = []; let touched = false;
   for (let k = 4; k >= 1; k--) {
     const ws = addDays(cur, -7 * k), key = iso(ws);
     if (state.rolled[key]) continue;
-    state.rolled[key] = 1;
+    state.rolled[key] = 1; touched = true;
     if (ws < sinceWs) continue;
     const end = new Date(addDays(ws, 7).getTime() - 1000);
     const M = L.generate(state, ws, end).meta;
@@ -1031,7 +1041,7 @@ function rollover() {
     }
   }
   if (added.length) { save(); renderAll(); showCard('Retard mis à jour', added.length + ' série' + (added.length > 1 ? 's' : '') + ' pas finie' + (added.length > 1 ? 's' : '') + ' de la semaine passée · ' + hm(added.reduce((a, x) => a + x.minutes, 0))); }
-  else save();
+  else if (touched) save();
 }
 
 /* ---------- Ma semaine type ---------- */
