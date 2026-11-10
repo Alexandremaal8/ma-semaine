@@ -914,6 +914,9 @@ function parseAnnounce(title, text, ref) {
     kind = 'cancel'; type = /(exerc|seance d'ex|exercise|ta session|tutorial)/.test(t) ? 'Exercices' : /(cours|lecture|class)/.test(t) ? 'Cours' : '';
   } else if (/(examen final|final exam|exam(en)? (de |du |of )?(session|janvier|january|fevrier|february)|date de l'examen|exam date)/.test(t)) kind = 'exam';
   if (!kind) return null;
+  // talking about an exam that already happened (results, statistics, grades, solutions, copy review): nothing to plan
+  const past = /(resultat|results?\b|statisti|stats\b|grades?\b|notes? (de|du|sont|are)|moyenne|average|median|distribution|corrig|solution|consultation des copies|copy review|review session|feedback|a eu lieu|took place|thank(s| you) for (taking|participating)|merci (d'avoir|pour votre participation)|how (did|was) the|retour sur|bilan)/.test(t);
+  if (past && kind !== 'cancel') return null;
   const found = [];
   const fix = (y, mo, d) => { if (mo < 0 || mo > 11 || d < 1 || d > 31) return null; let yy = y || r.getFullYear(); let dt = new Date(yy, mo, d); if (!y && dt < addDays(r, -60)) dt = new Date(yy + 1, mo, d); if (dt.getMonth() !== mo) return null; return dt; };
   let m;
@@ -924,7 +927,7 @@ function parseAnnounce(title, text, ref) {
   while ((m = reB.exec(t))) { const d = fix(m[3] ? +m[3] : 0, monthOf(m[1]), +m[2]); if (d) found.push({ d, at: m.index }); }
   const reC = /(?<![\d.:,])(\d{1,2})[./](\d{1,2})(?:[./](\d{2}|\d{4}))?(?![\d:h])/g;
   while ((m = reC.exec(t))) { const y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : 0; const d = fix(y, +m[2] - 1, +m[1]); if (d) found.push({ d, at: m.index }); }
-  if (!found.length) {
+  if (!found.length && kind === 'cancel') {
     const rel = /(demain|tomorrow)/.exec(t); if (rel) found.push({ d: addDays(new Date(r.getFullYear(), r.getMonth(), r.getDate()), 1), at: rel.index });
     else { const wd = new RegExp('(?:ce |this |next |prochain )?(' + WD_RE.flat().join('|') + ')(?![a-z])').exec(t); if (wd) { const k = WD_RE.findIndex(x => x.includes(wd[1])); let d = new Date(r.getFullYear(), r.getMonth(), r.getDate()); let n = (k - d.getDay() + 7) % 7 || 7; if (/next|prochain/.test(wd[0]) && n < 7) n += 7 * (/(next|prochain)/.test(wd[0]) && n <= 2 ? 0 : 0); found.push({ d: addDays(d, n), at: wd.index }); } }
   }

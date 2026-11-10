@@ -136,6 +136,51 @@ export function niceName(raw, kind, num) {
   return (out || String(raw || '')).slice(0, 120);
 }
 
+
+/* ---------- understanding announcements (free Workers AI) ---------- */
+const AI_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const annKey = a => a.course + ':' + a.id + ':' + a.time;
+const PROMPT = `You read course announcements from EPFL's Moodle for a first-year student's study planner, and decide what the planner should do.
+Answer with ONE JSON object only, no other text:
+{"action":"add_mock|add_exam|cancel_session|room_change|deadline|info","date":"YYYY-MM-DD or null","start":"HH:MM or null","end":"HH:MM or null","room":"room or null","session":"Cours|Exercices|null","summary":"one short sentence in French (max 140 chars) saying what matters for the student"}
+Rules:
+- add_mock: ONLY if the announcement schedules an upcoming mock exam / midterm / examen blanc and gives (or changes) its date. Results, statistics, grades, solutions, copy review, feedback or comments about a mock that already happened are "info".
+- add_exam: only if it gives the date of an upcoming final/session exam.
+- cancel_session: a lecture (Cours) or exercise session (Exercices) will NOT take place on a given date.
+- room_change: a session moves to another room or time on a given date (put the new room/time).
+- deadline: something the student must do or hand in before a date (registration, quiz, form, project). Not the weekly exercise sets.
+- info: everything else.
+- Resolve relative dates ("ce jeudi", "next week", "tomorrow") from the posting date. Dates in the past are possible only for "info".
+- start/end in 24h format. If unsure about a field, use null. If unsure about the action, use "info".`;
+function cleanAi(o) {
+  const A = ['add_mock', 'add_exam', 'cancel_session', 'room_change', 'deadline', 'info'];
+  if (!o || !A.includes(o.action)) return null;
+  const d = typeof o.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? o.date : null;
+  const hm = v => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || '')); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; };
+  const out = { action: o.action, date: d, start: hm(o.start), end: hm(o.end), room: o.room && o.room !== 'null' ? String(o.room).slice(0, 40) : null, session: ['Cours', 'Exercices'].includes(o.session) ? o.session : null, summary: String(o.summary || '').slice(0, 160) };
+  if (out.action !== 'info' && !out.date) out.action = 'info';
+  if (out.end != null && out.start != null && out.end <= out.start) out.end = null;
+  return out;
+}
+export async function analyzeAnnouncement(env, an, courseName) {
+  if (!env.AI) return null;
+  const posted = new Date(an.posted || an.time).toLocaleString('en-CA', { timeZone: 'Europe/Zurich', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  const r = await env.AI.run(AI_MODEL, { messages: [{ role: 'system', content: PROMPT }, { role: 'user', content: `Course: ${courseName}\nPosted: ${posted} (Europe/Zurich)\nTitle: ${an.title}\n\n${String(an.text || '').slice(0, 3000)}` }], max_tokens: 220, temperature: 0 });
+  const txt = typeof r === 'string' ? r : r && (typeof r.response === 'string' ? r.response : r.response ? JSON.stringify(r.response) : '');
+  const m = /\{[\s\S]*\}/.exec(txt || ''); if (!m) return null;
+  try { return cleanAi(JSON.parse(m[0])); } catch (e) { return null; }
+}
+async function understand(env, dig, old) {
+  const prev = {}; for (const a of (old && old.announcements) || []) if (a.ai) prev[annKey(a)] = a.ai;
+  let budget = 8;
+  for (const a of dig.announcements || []) {
+    const k = annKey(a);
+    if (prev[k]) { a.ai = prev[k]; continue; }
+    if (budget-- <= 0) continue;
+    try { const c = (dig.courses || []).find(x => x.id === a.course); a.ai = await analyzeAnnouncement(env, a, c ? c.name + ' (' + c.short + ')' : '') || undefined; } catch (e) { dig.errors.ai = String(e.message || e).slice(0, 120); }
+  }
+}
+
 const KEY_RE = /^[a-f0-9]{32,64}$/;
 export async function refreshMoodle(env, k, force) {
   const cfg = await env.KV.get('mcfg:' + k, 'json'); if (!cfg) return null;
@@ -155,6 +200,7 @@ export async function refreshMoodle(env, k, force) {
     try {
       const a = await readApi(cfg.token);
       Object.assign(dig, { user: a.user, courses: a.courses, items: a.items, announcements: a.announcements });
+      await understand(env, dig, old);
       // API events complete the iCal ones (same deadline may come from both: keep one)
       // events still waiting for you on Moodle (not submitted / not completed) are marked "todo"
       for (const e of a.events) { const same = dig.events.find(x => Math.abs(x.start - e.start) < 60e3 && x.title === e.title); if (same) same.todo = true; else dig.events.push(e); }

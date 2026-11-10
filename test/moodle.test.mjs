@@ -72,3 +72,14 @@ console.log('moodle OK');
   assert.ok(!wed.some(e => e.subj === 'phy') && wed.some(e => e.subj === 'ana'));
   console.log('moodle announce OK');
 }
+{
+  const { analyzeAnnouncement } = await import('../worker/src/moodle.js');
+  const mk = resp => ({ AI: { run: async () => ({ response: resp }) } });
+  const an = { title: 'x', text: 'y', time: Date.now() };
+  assert.equal((await analyzeAnnouncement(mk('{"action":"add_mock","date":"2026-12-02","start":"08:15","end":"10:00","summary":"ok"}'), an, 'c')).start, 495);
+  assert.equal((await analyzeAnnouncement(mk('{"action":"add_mock","date":null}'), an, 'c')).action, 'info');   // no date → nothing to plan
+  assert.equal(await analyzeAnnouncement(mk('sorry, I cannot'), an, 'c'), null);
+  assert.equal(await analyzeAnnouncement(mk('{"action":"delete_everything"}'), an, 'c'), null);
+  assert.equal(await analyzeAnnouncement({}, an, 'c'), null);   // no AI: the app falls back to its own reading
+  console.log('moodle ai OK');
+}

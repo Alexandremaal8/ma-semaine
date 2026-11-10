@@ -745,7 +745,7 @@ function mdFeed() {
   if (!moodle || !moodle.ok || !moodle.ok.api) return [];
   const since = Date.now() - 4 * 864e5, dis = state.dismiss || {};
   const items = (moodle.items || []).filter(i => i.time > since).map(i => ({ file: i.file, id: 'f' + i.course + '-' + i.time + i.title.slice(0, 20), t: i.time, subj: mdCourseSubj(i.course), title: mdName(i), tag: i.kind === 'correction' ? 'Corrigé' : i.kind === 'serie' ? 'Série' : 'Doc', url: i.url }));
-  const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.text, tag: 'Annonce', annId: annKey(a) }));
+  const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.ai && a.ai.summary ? a.ai.summary : a.text, tag: 'Annonce', annId: annKey(a) }));
   return items.concat(ann).filter(x => !dis['mf:' + x.id]).sort((a, b) => b.t - a.t).slice(0, 5);
 }
 // a corrigé published earlier than planned moves the correction forward, automatically
@@ -864,15 +864,18 @@ function mdProposal() {
   for (const an of mdApi() ? moodle.announcements || [] : []) {
     if (dis['ma:' + annKey(an)]) continue;
     const subj = mdCourseSubj(an.course), su = subj && subjOf(state, subj); if (!su) continue;
-    const p = L.parseAnnounce(an.title, an.text, an.posted || an.time); if (!p || !p.date || fromIso(p.date) < fromIso(todayIso())) continue;
+    const p = annPlan(an); if (!p || !p.date || fromIso(p.date) < fromIso(todayIso())) continue;
     const when = dateLbl(fromIso(p.date)) + (p.start != null ? ' à ' + fmt(p.start) + (p.end ? '–' + fmt(p.end) : '') : '');
     const btns = (main, label) => `<div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="${main}" data-v="${esc(annKey(an))}">${label}</button><button type="button" class="btn" data-act="mdAnn" data-v="${esc(annKey(an))}">Lire l’annonce</button><button type="button" class="btn" data-act="dismiss" data-v="ma:${esc(annKey(an))}">Ignorer</button></div>`;
+    const said = p.summary ? esc(p.summary) : '« ' + esc(an.title) + ' »';
     if (p.kind === 'mock' && !(state.mocks || []).some(m => m.subj === subj && m.date === p.date))
-      return `<div class="prop"><b>Annonce : examen blanc ${esc(de(su.name))}</b><p>« ${esc(an.title)} » · ${when}${p.start == null ? ' (heure à vérifier)' : ''}. Je l’ajoute au planning, avec la révision avant ?</p>${btns('maMock', 'Ajouter')}</div>`;
+      return `<div class="prop"><b>Annonce : examen blanc ${esc(de(su.name))}</b><p>${said} · ${when}${p.room ? ', ' + esc(p.room) : ''}${p.start == null ? ' (heure à vérifier)' : ''}. Je l’ajoute au planning, avec la révision avant ?</p>${btns('maMock', 'Ajouter')}</div>`;
+    if (p.kind === 'room') return `<div class="prop"><b>Annonce · ${esc(su.name)}, ${dateLbl(fromIso(p.date))}</b><p>${said}${p.room ? ' Salle : ' + esc(p.room) + '.' : ''}</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="dismiss" data-v="ma:${esc(annKey(an))}">Noté</button><button type="button" class="btn" data-act="mdAnn" data-v="${esc(annKey(an))}">Lire l’annonce</button></div></div>`;
+    if (p.kind === 'deadline' && !(state.backlog || []).some(x => x.maKey === annKey(an))) return `<div class="prop"><b>À faire avant le ${dateLbl(fromIso(p.date))} · ${esc(su.name)}</b><p>${said} Je l’ajoute à ton retard pour ne pas l’oublier ?</p>${btns('maTodo', 'Ajouter')}</div>`;
     if (p.kind === 'exam' && su.exam !== p.date && fromIso(p.date) < addDays(new Date(), 150))
-      return `<div class="prop"><b>Annonce : examen ${esc(de(su.name))} le ${dateLbl(fromIso(p.date))}</b><p>« ${esc(an.title)} ». ${su.exam ? 'Tu avais noté le ' + dateLbl(fromIso(su.exam)) + '. ' : ''}Je l’utilise pour le mode Exam et les révisions ?</p>${btns('maExam', 'Ajouter')}</div>`;
+      return `<div class="prop"><b>Annonce : examen ${esc(de(su.name))} le ${dateLbl(fromIso(p.date))}</b><p>${said}. ${su.exam ? 'Tu avais noté le ' + dateLbl(fromIso(su.exam)) + '. ' : ''}Je l’utilise pour le mode Exam et les révisions ?</p>${btns('maExam', 'Ajouter')}</div>`;
     if (p.kind === 'cancel' && !(state.cancel || []).some(c => c.subj === subj && c.date === p.date) && state.courses.some(c => c.subj === subj && c.day === dow(fromIso(p.date)) && (!p.type || c.type === p.type)))
-      return `<div class="prop"><b>Annonce : pas ${p.type === 'Exercices' ? 'd’exercices' : 'de cours'} ${esc(de(su.name))} le ${dateLbl(fromIso(p.date))}</b><p>« ${esc(an.title)} ». Je libère ce créneau dans ton planning ?</p>${btns('maCancel', 'Libérer')}</div>`;
+      return `<div class="prop"><b>Annonce : pas ${p.type === 'Exercices' ? 'd’exercices' : 'de cours'} ${esc(de(su.name))} le ${dateLbl(fromIso(p.date))}</b><p>${said}. Je libère ce créneau dans ton planning ?</p>${btns('maCancel', 'Libérer')}</div>`;
   }
   return '';
 }
@@ -888,11 +891,19 @@ function mdAutoDone() {
   if (gone.length) { save(); renderAll(); endChange('Fait sur Moodle', gone.join(', ') + ' : retiré de ton retard. Annulable dans l’onglet Retard.'); }
 }
 const annKey = an => an.course + ':' + an.id;
+// what an announcement means for the planner: the AI reading when there is one, else the built-in reading
+function annPlan(an) {
+  if (an.ai) {
+    const K = { add_mock: 'mock', add_exam: 'exam', cancel_session: 'cancel', room_change: 'room', deadline: 'deadline' }[an.ai.action];
+    return K && an.ai.date ? { kind: K, date: an.ai.date, start: an.ai.start, end: an.ai.end, type: an.ai.session || '', room: an.ai.room, summary: an.ai.summary } : null;
+  }
+  return L.parseAnnounce(an.title, an.text, an.posted || an.time);
+}
 const annFind = k => ((moodle && moodle.announcements) || []).find(a => annKey(a) === String(k));
 function mdAnnSheet(id) {
   const an = annFind(id); if (!an) return;
   const subj = mdCourseSubj(an.course), su = subj && subjOf(state, subj), d = new Date(an.time);
-  openSheet(an.title, `<p class="hint" style="margin:-4px 0 12px;padding:0">${esc(su ? su.name : 'Moodle')} · ${dateLbl(d)} ${fmt(d.getHours() * 60 + d.getMinutes())}${an.author ? ' · ' + esc(an.author) : ''}</p><div class="ann-text">${esc(an.text || '')}</div><div class="sh-actions"><a class="btn" href="https://moodle.epfl.ch/mod/forum/discuss.php?d=${encodeURIComponent(an.id)}" target="_blank" rel="noopener">Ouvrir sur Moodle</a></div>`, () => true);
+  openSheet(an.title, `<p class="hint" style="margin:-4px 0 12px;padding:0">${esc(su ? su.name : 'Moodle')} · ${dateLbl(d)} ${fmt(d.getHours() * 60 + d.getMinutes())}${an.author ? ' · ' + esc(an.author) : ''}</p>${an.ai && an.ai.summary ? `<div class="ann-sum"><b>En bref</b>${esc(an.ai.summary)}</div>` : ''}<div class="ann-text">${esc(an.text || '')}</div><div class="sh-actions"><a class="btn" href="https://moodle.epfl.ch/mod/forum/discuss.php?d=${encodeURIComponent(an.id)}" target="_blank" rel="noopener">Ouvrir sur Moodle</a></div>`, () => true);
 }
 function mdAnnList() {
   const as = (moodle && moodle.announcements) || [];
@@ -906,12 +917,13 @@ function mdAction(a, v, b) {
   if (a === 'mdOpen') { mdOpen(v); return true; }
   if (a === 'mdAnn') { mdAnnSheet(v); return true; }
   if (a === 'mdAnnList') { mdAnnList(); return true; }
-  if (a === 'maMock' || a === 'maExam' || a === 'maCancel') {
+  if (a === 'maMock' || a === 'maExam' || a === 'maCancel' || a === 'maTodo') {
     const an = annFind(v); if (!an) return true;
-    const subj = mdCourseSubj(an.course), p = L.parseAnnounce(an.title, an.text, an.posted || an.time); if (!subj || !p || !p.date) return true;
+    const subj = mdCourseSubj(an.course), p = annPlan(an); if (!subj || !p || !p.date) return true;
     beginChange();
     if (a === 'maMock') { const s0 = p.start != null ? p.start : 495; state.mocks.push({ id: uid(), subj, date: p.date, start: s0, end: p.end != null ? p.end : s0 + 105, place: '' }); }
     if (a === 'maExam') { const su = subjOf(state, subj); if (su) su.exam = p.date; }
+    if (a === 'maTodo') state.backlog.push({ id: uid(), subj, title: (p.summary || an.title).slice(0, 90), minutes: 15, urgent: true, created: Date.now(), auto: false, maKey: annKey(an) });
     if (a === 'maCancel') { state.cancel = state.cancel || []; state.cancel.push({ date: p.date, subj, type: p.type || '' }); }
     done(); return true;
   }
