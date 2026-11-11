@@ -211,7 +211,7 @@ function normalize(s) {
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
   out.notif = Object.assign({}, d.notif, out.notif || {});
   out.done = out.done || {};
-  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog', 'cancel', 'weekly', 'projects'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
+  ['subjects', 'courses', 'routines', 'events', 'offDays', 'trips', 'mocks', 'noCourseWeeks', 'backlog', 'cancel', 'weekly', 'projects', 'sportLog'].forEach(k => { if (!Array.isArray(out[k])) out[k] = d[k]; });
   if (!out.weekModes || typeof out.weekModes !== 'object') out.weekModes = {};
   if (!out.frozen || typeof out.frozen !== 'object') out.frozen = {};
   if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
@@ -585,7 +585,7 @@ function generate(S0, weekStart, now) {
           if (t.subj) { revLeft[t.subj] = Math.max(0, (revLeft[t.subj] || 0) - s.len); lastByDay[s.d] = t.subj; }
           continue;
         }
-        const pk = Object.keys(prep).find(k => !prep[k].task && prep[k].left >= 15 && s.date < prep[k].date && (prep[k].date - s.date) / 864e5 <= 2 && lastByDay[s.d] !== k);
+        const pk = Object.keys(prep).find(k => !prep[k].task && prep[k].left >= 15 && s.date < prep[k].date && (prep[k].date - s.date) / 864e5 <= 3 && lastByDay[s.d] !== k);
         if (pk) {
           const md = prep[pk].date;
           s.title = 'Révision pour l’examen blanc (' + DAYS[dow(md)].toLowerCase() + ' ' + md.getDate() + ')'; s.subj = pk;
@@ -667,9 +667,12 @@ function generate(S0, weekStart, now) {
     for (const mk of S.mocks || []) {
       if (!mk.date || !subjOf(S, mk.subj)) continue;
       const md = fromIso(mk.date);
-      if (md < weekStart || md >= addDays(weekStart, 7)) continue;
-      const done = Object.values(doneMapAll).filter(v => v && v.s === mk.subj && /examen blanc/.test(v.t || '')).reduce((a, v) => a + (v.m || 0), 0);
-      out[mk.subj] = { date: md, left: Math.max(0, 100 - done) };
+      if (md < weekStart || md >= addDays(weekStart, 10)) continue;   // a Monday mock is prepared the weekend before
+      // revision time before a mock: more for the subjects that matter most
+      const su = subjOf(S, mk.subj), budget = mockPrepBudget(su);
+      let done = 0;
+      for (const [wk, recs] of Object.entries(S.done || {})) { const w0 = fromIso(wk); if (w0 > md || addDays(w0, 7) < addDays(md, -7)) continue; for (const v of Object.values(recs || {})) if (v && v.s === mk.subj && /examen blanc/.test(v.t || '')) done += Math.round((v.m || 0) * (v.p || 1)); }
+      if (!out[mk.subj] || md < out[mk.subj].date) out[mk.subj] = { date: md, left: Math.max(0, budget - done) };
     }
     for (const t of S.weekly || []) {
       if (!t.minutes || t.before == null) continue;
@@ -730,7 +733,9 @@ function generate(S0, weekStart, now) {
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
     const b = base[i];
-    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
+    // a block done keeps the length it had when ticked (a slot can have been cut for a weekly task since)
+    const recLen = rec && typeof rec === 'object' && rec.m ? Math.round(rec.p ? rec.m / rec.p : rec.m) : 0;
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, recLen && recLen < s.len ? { end: s.start + recLen, endT: s.startT + recLen * 6e4, len: recLen } : {}, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
     else if (s.endT <= nowT) {
       const pre = s.endT <= sinceT;
       if (!pre) lateMin += s.len;
@@ -1044,6 +1049,74 @@ function parseAnnounce(title, text, ref) {
   return { kind, type, date: iso(first.d), start, end };
 }
 
-const API = { parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+
+/* ---------- sport: 3 rotating workouts for a push-up board + its resistance cables ----------
+ * Double progression: each exercise has a rep (or seconds) range and harder variants.
+ * Hit the target on every set → +1 rep next time; past the top of the range → next variant, back to the bottom. */
+const X = (id, name, sets, min, max, rest, levels, o = {}) => ({ id, name, sets, min, max, rest, levels, time: !!o.time, side: !!o.side, start: o.start || 0, step: o.time ? 5 : 1 });
+const PUSHUP_LV = zone => [
+  ['Sur les genoux', 'Genoux au sol, mains sur les poignées ' + zone + ', corps droit des genoux à la tête. Descends jusqu’à frôler la planche.'],
+  ['Classiques', 'Corps gainé comme une planche (fesses serrées, ventre rentré), coudes à ~45°, poitrine jusqu’aux poignées.'],
+  ['Descente lente (3 s)', 'Comme les classiques, mais 3 secondes pour descendre, remontée normale.'],
+  ['Pieds surélevés', 'Pieds sur une chaise ou le lit : plus de poids sur les bras.'],
+  ['Pieds surélevés + descente lente', 'Pieds sur la chaise et 3 secondes pour descendre.']];
+const SPORT = {
+  warm: [['Cercles de bras', '10 en avant, 10 en arrière, bras tendus', 45], ['Jumping jacks', 'Rythme tranquille, pour monter le cœur', 45], ['Squats sans charge', 'Lents, talons au sol, poitrine haute', 45], ['Chat-vache', 'À quatre pattes : arrondis puis creuse le dos, lentement', 45], ['Pompes faciles', 'Mains sur la table ou le lit, 10 reps sans forcer', 45]],
+  workouts: [
+    { id: 'A', name: 'Poussée + gainage', focus: 'Pecs, épaules, triceps, abdos', ex: [
+      X('a1', 'Pompes · zone poitrine', 4, 8, 15, 90, PUSHUP_LV('de la zone poitrine (Chest)'), { start: 1 }),
+      X('a2', 'Pompes piquées · zone épaules', 3, 6, 12, 90, [['Piquées', 'Poignées de la zone épaules (Shoulder). Fesses en l’air en V inversé, descends la tête entre les mains.'], ['Piquées, pieds sur une chaise', 'Plus vertical : plus de poids sur les épaules.'], ['Pieds sur une chaise + pause 1 s en bas', 'Tête presque sur la planche, une seconde, puis pousse.']]),
+      X('a3', 'Développé épaules · câbles', 3, 10, 15, 60, [['Debout sur la planche', 'Accroche les câbles à la planche, pieds dessus. Poignées aux épaules, pousse vers le plafond, bras tendus.'], ['Pieds plus écartés', 'Plus de tension dans les câbles.'], ['Descente lente (3 s)', 'Pousse vite, redescends en 3 secondes.'], ['Câbles raccourcis', 'Enroule une fois le câble autour de la main : bien plus dur.']]),
+      X('a4', 'Pompes serrées · zone triceps', 3, 8, 15, 75, PUSHUP_LV('de la zone triceps (prise serrée)')),
+      X('a5', 'Élévations latérales · câbles', 3, 12, 20, 45, [['Deux bras', 'Debout sur la planche, bras légèrement fléchis, monte les poignées sur les côtés jusqu’aux épaules.'], ['Pause 1 s en haut', 'Tiens une seconde à hauteur d’épaule.'], ['Un bras avec les deux câbles', 'Un bras à la fois, les deux câbles dans la même main.']]),
+      X('a6', 'Gainage (planche)', 3, 30, 60, 45, [['Sur les avant-bras', 'Corps droit des talons à la tête, fesses serrées, respire.'], ['Bras tendus sur les poignées', 'Mains sur les poignées, épaules au-dessus des mains.'], ['Une jambe levée', 'Alterne la jambe toutes les 10 secondes.'], ['Toucher d’épaule', 'Bras tendus, touche l’épaule opposée en alternant, sans bouger les hanches.']], { time: true })] },
+    { id: 'B', name: 'Tirage + jambes', focus: 'Dos, biceps, cuisses, fessiers', ex: [
+      X('b1', 'Rowing penché · câbles', 4, 10, 15, 75, [['Deux bras', 'Pieds sur la planche, buste penché à ~45°, dos plat. Tire les poignées vers le nombril, coudes près du corps.'], ['Pause 2 s', 'Serre les omoplates 2 secondes à chaque rep.'], ['Pieds plus écartés', 'Plus de tension dans les câbles.'], ['Un bras avec les deux câbles', 'Un côté à la fois, les deux câbles dans la même main.']]),
+      X('b2', 'Squat · câbles', 4, 12, 20, 90, [['Sans câbles', 'Pieds largeur d’épaules, descends comme pour t’asseoir, genoux dans l’axe des pieds.'], ['Avec câbles', 'Debout sur la planche, poignées aux épaules.'], ['Câbles + pause 2 s en bas', 'Tiens 2 secondes en bas.'], ['Squat bulgare (par jambe)', 'Pied arrière sur une chaise, descends sur la jambe avant. Les reps sont par jambe.']]),
+      X('b3', 'Soulevé de terre jambes tendues · câbles', 3, 12, 15, 75, [['Deux jambes', 'Debout sur la planche, jambes presque tendues : penche le buste en reculant les fesses, dos plat, puis remonte en serrant les fessiers.'], ['Descente lente (3 s)', 'Sens bien l’étirement derrière les cuisses.'], ['Une jambe (par jambe)', 'Sur un pied, l’autre jambe part en arrière.']]),
+      X('b4', 'Oiseau · câbles (arrière d’épaules)', 3, 12, 20, 45, [['Penché', 'Buste penché, câbles croisés sous la planche, ouvre les bras sur les côtés.'], ['Pause 1 s', 'Tiens une seconde bras ouverts.']]),
+      X('b5', 'Curl biceps · câbles', 3, 10, 15, 45, [['Deux bras', 'Debout sur la planche, coudes collés au corps, monte les poignées vers les épaules.'], ['Descente lente (3 s)', 'Contrôle la redescente.'], ['Pieds plus écartés', 'Plus de tension.']]),
+      X('b6', 'Pont fessier', 3, 12, 20, 45, [['Deux jambes', 'Sur le dos, pieds à plat, monte le bassin en serrant les fessiers.'], ['Pause 2 s en haut', 'Tiens 2 secondes à chaque rep.'], ['Une jambe (par jambe)', 'Une jambe tendue en l’air.']]),
+      X('b7', 'Dead bug', 3, 8, 12, 45, [['Lent', 'Sur le dos, bras vers le plafond, genoux à 90°. Descends bras et jambe opposés sans décoller le bas du dos. Reps par côté.'], ['Très lent (3 s)', '3 secondes pour descendre.']])] },
+    { id: 'C', name: 'Corps complet', focus: 'Tout le corps, plus cardio', ex: [
+      X('c1', 'Pompes larges · zone dos', 3, 8, 15, 75, PUSHUP_LV('de la zone large (Back)'), { start: 1 }),
+      X('c2', 'Fentes arrière', 3, 8, 15, 75, [['Sans charge', 'Recule une jambe, descends le genou arrière près du sol, buste droit. Reps par jambe.'], ['Avec câbles', 'Pied avant sur la planche, poignées aux épaules.'], ['Pause 2 s en bas', 'Tiens en bas.'], ['Fentes sautées', 'Change de jambe en sautant, en douceur.']], { side: true }),
+      X('c3', 'Rowing un bras · câbles', 3, 10, 15, 60, [['Un câble', 'Pied sur la planche, autre main sur le genou, tire vers la hanche. Reps par bras.'], ['Les deux câbles', 'Les deux câbles dans la même main.'], ['Deux câbles + pause 2 s', 'Serre l’omoplate 2 secondes.']], { side: true }),
+      X('c4', 'Dips sur chaise', 3, 8, 15, 75, [['Jambes pliées', 'Mains sur le bord d’une chaise stable, descends en pliant les coudes vers l’arrière.'], ['Jambes tendues', 'Talons au sol, jambes tendues.'], ['Pieds surélevés', 'Pieds sur une autre chaise ou le lit.']]),
+      X('c5', 'Mountain climbers · poignées', 3, 30, 45, 45, [['Rythme tranquille', 'Mains sur les poignées, ramène les genoux vers la poitrine en alternant.'], ['Rapide', 'Le plus vite possible en gardant le dos plat.']], { time: true }),
+      X('c6', 'Planche latérale', 2, 20, 45, 30, [['Sur les genoux', 'Sur l’avant-bras, genoux au sol, corps droit. Temps par côté.'], ['Jambes tendues', 'Sur l’avant-bras et le côté du pied.'], ['Jambe du dessus levée', 'Plus dur pour les obliques.']], { time: true, side: true }),
+      X('c7', 'Mollets', 2, 15, 25, 30, [['Deux pieds', 'Avant des pieds sur une marche ou la planche, monte sur la pointe, descends lentement.'], ['Un pied', 'Un pied à la fois.']])] }
+  ]
+};
+const mockPrepBudget = su => ({ 3: 210, 2: 150, 1: 100 })[su && su.prio] || 150;
+const sportEx = id => { for (const w of SPORT.workouts) for (const e of w.ex) if (e.id === id) return e; return null; };
+// where an exercise stands: variant (level) and target per set
+function sportLevel(S, id) {
+  const e = sportEx(id), p = (S.sportProg || {})[id];
+  if (!e) return null;
+  const lvl = p ? Math.min(p.lvl, e.levels.length - 1) : Math.min(e.start, e.levels.length - 1);
+  return { lvl, target: p ? Math.max(e.min, Math.min(e.max, p.target)) : e.min, fails: p ? p.fails || 0 : 0 };
+}
+// after a session: what the next target is, from what was actually done
+function sportProgress(S, id, done) {
+  const e = sportEx(id); if (!e || !done || !done.length) return null;
+  const cur = sportLevel(S, id); let { lvl, target, fails } = cur; let note = '';
+  if (done.every(r => r >= target)) {
+    fails = 0;
+    const next = Math.max(target + e.step, Math.min(...done));
+    if (next > e.max) {
+      if (lvl < e.levels.length - 1) { lvl++; target = e.min; note = 'niveau suivant : ' + e.levels[lvl][0]; }
+      else { target = e.max; note = 'au max, garde ce rythme'; }
+    } else { target = next; note = (e.time ? target + ' s' : target + ' reps') + ' la prochaine fois'; }
+  } else if (done.reduce((a, r) => a + r, 0) / done.length < e.min) {
+    fails++;
+    if (fails >= 2 && lvl > 0) { lvl--; target = e.min; fails = 0; note = 'variante plus facile : ' + e.levels[lvl][0]; }
+    else note = 'même objectif la prochaine fois';
+  } else note = 'même objectif la prochaine fois';
+  S.sportProg = S.sportProg || {}; S.sportProg[id] = { lvl, target, fails };
+  return { lvl, target, note, up: lvl > cur.lvl || target > cur.target };
+}
+
+const API = { mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

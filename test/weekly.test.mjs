@@ -42,3 +42,17 @@ console.log('weekly OK');
   assert.ok(total >= 19 * 60 && total <= 21 * 60, 'about 20h in total: ' + total);
 }
 console.log('projects OK');
+{
+  // sport: double progression
+  const S3 = {};
+  assert.deepEqual(L.sportLevel(S3, 'a1'), { lvl: 1, target: 8, fails: 0 });          // push-ups start "classiques", 8 reps
+  L.sportProgress(S3, 'a1', [8, 8, 8, 8]); assert.equal(S3.sportProg.a1.target, 9);    // all sets hit → +1
+  L.sportProgress(S3, 'a1', [9, 9, 7, 6]); assert.equal(S3.sportProg.a1.target, 9);    // missed one → same
+  L.sportProgress(S3, 'a1', [15, 15, 15, 15]); assert.equal(S3.sportProg.a1.target, 15);
+  const up = L.sportProgress(S3, 'a1', [15, 15, 15, 15]); assert.equal(up.lvl, 2); assert.equal(S3.sportProg.a1.target, 8);   // next variant
+  L.sportProgress(S3, 'a1', [4, 4, 3, 3]); L.sportProgress(S3, 'a1', [5, 4, 4, 3]); assert.equal(S3.sportProg.a1.lvl, 1);      // twice far below → easier variant
+  L.sportProgress(S3, 'a6', [30, 30, 30]); assert.equal(S3.sportProg.a6.target, 35);   // timed: +5 s
+  // revision time before a mock depends on how much the subject matters
+  assert.equal(L.mockPrepBudget({ prio: 3 }), 210); assert.equal(L.mockPrepBudget({ prio: 2 }), 150);
+}
+console.log('sport OK');

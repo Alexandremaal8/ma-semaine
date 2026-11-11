@@ -493,6 +493,7 @@ function renderToday() {
   const sel = fromIso(selDate), ws = mondayOf(sel), key = iso(ws);
   const days = L.generate(state, ws), sm = L.summarize(state, days, key);
   const wmode = days.meta.cfg.mode;
+  const spPlan = sportPlanFor(key, days);
   document.body.dataset.mode = wmode;
   const day = days[dow(sel)];
   const isToday = selDate === todayIso();
@@ -568,7 +569,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${tags}</div>${e.sub ? `<div class="su">${esc(e.sub)}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}</div>` : ''}${e.kind === 'course' && !e.room ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${mdBlockLinks(e, key)}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${e.kind === 'course' && !e.room ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key)}${mdBlockLinks(e, key)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -647,6 +648,7 @@ function ciShow() {
 function ciAnswer(f) {
   const c = ciQueue.shift(); if (!c) return;
   if (f > 0) {
+    if (/examen blanc/.test(c.e.title || '')) revRemember(c.wk, c.id, f);
     const d = state.done[c.wk] = state.done[c.wk] || {}, e = c.e, len = e.end - e.start;
     d[c.id] = { s: e.subj, t: e.title, m: Math.round(len * f), d: dow(c.date), a: e.start, serie: e.serie, c: !!e.corr || undefined, b: e.bl || undefined, p: f < 1 ? f : undefined };
   } else { state.asked = state.asked || {}; (state.asked[c.wk] = state.asked[c.wk] || {})[c.id] = 1; }
@@ -1034,6 +1036,192 @@ function stretchRun(d, wk, id) {
   }, 1000);
 }
 
+/* ---------- Révisions d'examen blanc : quoi réviser dans chaque bloc ---------- */
+// the material to cover: Moodle sections (cours, séries, corrigés) when Moodle is linked, else the semester weeks so far
+function revTopics(subj, mockIso) {
+  const md = fromIso(mockIso).getTime(), out = [];
+  const fs = mdFiles(subj).filter(i => i.time < md && i.kind !== 'exam');
+  if (fs.length) {
+    const sec = {};
+    for (const i of fs) { const k = i.section || 'Divers'; (sec[k] = sec[k] || { label: k, t: i.time, files: [] }); sec[k].t = Math.min(sec[k].t, i.time); sec[k].files.push(i.file); }
+    Object.values(sec).sort((a, b) => a.t - b.t).slice(-14).forEach(x => out.push({ label: x.label, files: x.files }));
+  } else {
+    const n = Math.max(1, L.semWeek(state, mondayOf(fromIso(mockIso))) - 1);
+    for (let k = 1; k <= Math.min(n, 14); k++) out.push({ label: 'Semaine ' + k, sub: 'cours + série ' + k, files: [] });
+  }
+  const ex = mdFiles(subj).filter(i => i.kind === 'exam');
+  out.push({ label: 'Examen d’entraînement', sub: 'en conditions réelles, chrono', files: ex.map(i => i.file), last: true });
+  return out;
+}
+// every revision block before this mock, in order, with the part of the material it covers
+function revPlan(subj, mockIso) {
+  const md = fromIso(mockIso), weeks = [mondayOf(addDays(md, -4)), mondayOf(md)].filter((w, i, a) => a.findIndex(x => +x === +w) === i);
+  const blocks = [];
+  for (const ws of weeks) {
+    const wk = iso(ws), days = L.generate(state, ws), dm = state.done[wk] || {};
+    for (const x of days) for (const e of x.ev) if (e.kind === 'study' && e.subj === subj && /examen blanc/.test(e.title) && x.date < md) blocks.push({ id: e.id, wk, at: x.date.getTime() + e.start * 6e4, len: e.end - e.start, done: !!dm[e.id] && e.state === 'done' });
+  }
+  blocks.sort((a, b) => a.at - b.at);
+  const topics = revTopics(subj, mockIso), mk = subj + ':' + mockIso, kept = (state.revDone || {})[mk] || {};
+  const covered = new Set(); for (const b of blocks) if (b.done && kept[b.id]) kept[b.id].forEach(i => covered.add(i));
+  const left = topics.map((t, i) => i).filter(i => !covered.has(i));
+  const todo = blocks.filter(b => !(b.done && kept[b.id]));
+  const plan = {};
+  for (const b of blocks) if (b.done && kept[b.id]) plan[b.id] = kept[b.id];
+  // the practice exam gets the last block to itself when there are at least 2 blocks left
+  const exI = topics.length - 1, lastAlone = todo.length >= 2 && left.includes(exI);
+  const spread = lastAlone ? todo.slice(0, -1) : todo, pool = lastAlone ? left.filter(i => i !== exI) : left;
+  if (lastAlone) plan[todo[todo.length - 1].id] = [exI];
+  const total = spread.reduce((a, b) => a + b.len, 0) || 1; let acc = 0, from = 0;
+  spread.forEach((b, k) => {
+    acc += b.len;
+    let to = k === spread.length - 1 ? pool.length : Math.round(pool.length * acc / total);
+    if (to <= from && from < pool.length) to = from + 1;
+    plan[b.id] = pool.slice(from, to); from = to;
+  });
+  return { topics, plan, mk };
+}
+function revLine(e, key) {
+  if (e.kind !== 'study' || !e.subj || !/examen blanc/.test(e.title)) return '';
+  const m = /\((\S+) (\d{1,2})\)/.exec(e.title); const mock = (state.mocks || []).filter(x => x.subj === e.subj && x.date >= key).sort((a, b) => a.date < b.date ? -1 : 1).find(x => fromIso(x.date).getDate() === +(m ? m[2] : -1));
+  if (!mock) return '';
+  const { topics, plan } = revPlan(e.subj, mock.date), idx = plan[e.id] || [];
+  if (!idx.length) return `<div class="su rev">Tout est couvert : refais les exos qui t’ont posé problème.</div>`;
+  const ts = idx.map(i => topics[i]);
+  const label = ts.length <= 3 ? ts.map(t => t.label + (t.sub ? ' (' + t.sub + ')' : '')).join(', ') : ts[0].label + ' → ' + ts[ts.length - 1].label;
+  const hasFiles = ts.some(t => t.files.length);
+  return `<div class="su rev"><b>À réviser :</b> ${esc(label)}</div>${hasFiles ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="revDocs" data-v="${esc(e.subj)}" data-d="${esc(mock.date)}" data-id="${esc(e.id)}">Docs à réviser</button></div>` : ''}`;
+}
+function revDocsSheet(subj, mockIso, id) {
+  const { topics, plan } = revPlan(subj, mockIso), idx = plan[id] || [];
+  const items = ((moodle && moodle.items) || []);
+  const rows = idx.map(i => topics[i]).map(t => `<div class="sec-t" style="margin:12px 0 6px">${esc(t.label)}</div><div class="group">${t.files.map(f => { const it = items.find(x => x.file === f); return it ? `<button type="button" class="li" data-act="mdOpen" data-v="${esc(f)}"><span class="bd"><span class="ti">${esc(mdName(it))}</span></span>${CHEV}</button>` : ''; }).join('') || '<div class="empty">Pas de document.</div>'}</div>`).join('');
+  openSheet('À réviser', rows || '<div class="empty">Rien à ouvrir pour ce bloc.</div>', () => true);
+}
+// when a revision block is ticked, the material it covered stays covered; the rest moves to the next blocks
+function revRemember(wk, id, part) {
+  for (const mk of state.mocks || []) {
+    const { plan, mk: key } = revPlan(mk.subj, mk.date); if (!(id in plan)) continue;
+    let idx = plan[id]; if (part != null && part < 1) idx = idx.slice(0, Math.max(0, Math.floor(idx.length * part)));
+    state.revDone = state.revDone || {}; (state.revDone[key] = state.revDone[key] || {})[id] = idx;
+  }
+}
+function revForget(id) { for (const k of Object.keys(state.revDone || {})) delete state.revDone[k][id]; }
+
+/* ---------- Sport : séances guidées avec la planche à pompes + câbles ---------- */
+let sportTimer = null, sportRun = null;
+const SP = L.SPORT;
+// which workout each sport block of the week gets: the rotation continues where you left off
+function sportPlanFor(key, days) {
+  const out = {}; let k = 0; const next = state.sportNext || 0, dm = state.done[key] || {};
+  for (const x of days) for (const e of x.ev) if (e.kind === 'sport') {
+    if (dm[e.id] && dm[e.id].w) { out[e.id] = SP.workouts.findIndex(w => w.id === dm[e.id].w); continue; }
+    if (dm[e.id]) continue;
+    out[e.id] = (next + k++) % SP.workouts.length;
+  }
+  return out;
+}
+function sportWorkoutOf(key, id) { const ws = fromIso(key); const p = sportPlanFor(key, L.generate(state, ws, new Date())); return p[id] != null && p[id] >= 0 ? p[id] : (state.sportNext || 0) % SP.workouts.length; }
+const exLine = e => { const lv = L.sportLevel(state, e.id); return `${e.sets} × ${lv.target}${e.time ? ' s' : ''}${e.side ? ' (par côté)' : ''} · ${e.levels[lv.lvl][0]}`; };
+function sportSheet(key, id) {
+  const wi = sportWorkoutOf(key, id), w = SP.workouts[wi];
+  const others = SP.workouts.map((x, i) => i === wi ? '' : `<button type="button" class="btn" data-act="sportPick" data-v="${i}" data-w="${key}" data-id="${esc(id)}">${esc(x.name)}</button>`).join('');
+  openSheet('Sport · ' + w.name, `<p class="hint" style="margin:-4px 0 12px;padding:0">${esc(w.focus)} · ~45 min avec l’échauffement. Les objectifs montent tout seuls d’une séance à l’autre selon ce que tu fais.</p>
+    <div class="group">${w.ex.map((e, i) => `<div class="st-row"><span class="st-n">${i + 1}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${esc(exLine(e))}</span></span></div>`).join('')}</div>
+    <p class="hint" style="margin:10px 0 0">Autre séance aujourd’hui ?</p><div class="btns" style="padding:6px 0 0">${others}</div>
+    <div class="sh-actions"><button type="button" class="btn pri" data-act="sportGo" data-v="${wi}" data-w="${key}" data-id="${esc(id)}">Commencer (échauffement 4 min)</button></div>`);
+}
+function sportStart(wi, key, id) {
+  const w = SP.workouts[wi];
+  sportRun = { wi, key, id, step: 'warm', wIdx: 0, t: SP.warm[0][2], ex: 0, set: 0, reps: {}, startedAt: Date.now() };
+  openSheet('Sport · ' + w.name, `<div id="spBox" class="sp-box"></div><div class="sh-actions" id="spAct"></div>`);
+  sportPaint(); sportTick();
+}
+function sportTick() {
+  clearInterval(sportTimer);
+  sportTimer = setInterval(() => {
+    if (!$('#spBox') || !sportRun) { clearInterval(sportTimer); return; }
+    const r = sportRun;
+    if (r.step === 'warm' || r.step === 'rest' || (r.step === 'timed' && r.going)) {
+      r.t--;
+      if (r.t <= 0) {
+        if (r.step === 'warm') { r.wIdx++; if (r.wIdx >= SP.warm.length) { r.step = 'set'; } else r.t = SP.warm[r.wIdx][2]; }
+        else if (r.step === 'rest') r.step = 'set';
+        else if (r.step === 'timed') { r.going = false; sportLog(r.target); return; }
+        if (navigator.vibrate) navigator.vibrate(200);
+      }
+      sportPaint();
+    }
+  }, 1000);
+}
+const mmss = t => Math.floor(t / 60) + ':' + String(Math.max(0, t) % 60).padStart(2, '0');
+function sportPaint() {
+  const r = sportRun, box = $('#spBox'), act = $('#spAct'); if (!r || !box) return;
+  const w = SP.workouts[r.wi], e = w.ex[r.ex];
+  const prog = `<div class="sp-prog">${w.ex.map((x, i) => `<i class="${i < r.ex ? 'ok' : i === r.ex && r.step !== 'warm' ? 'on' : ''}"></i>`).join('')}</div>`;
+  if (r.step === 'warm') {
+    const m = SP.warm[r.wIdx];
+    box.innerHTML = `${prog}<div class="sp-k">Échauffement · ${r.wIdx + 1}/${SP.warm.length}</div><div class="sp-n">${esc(m[0])}</div><div class="sp-h">${esc(m[1])}</div><div class="sp-big num">${mmss(r.t)}</div>`;
+    act.innerHTML = `<button type="button" class="btn" data-act="spSkip">Passer l’échauffement</button>`;
+    return;
+  }
+  const lv = L.sportLevel(state, e.id), lvl = e.levels[lv.lvl];
+  const head = `${prog}<div class="sp-k">${r.ex + 1}/${w.ex.length} · série ${r.set + 1}/${e.sets}</div><div class="sp-n">${esc(e.name)}</div><div class="sp-lv"><b>${esc(lvl[0])}</b> · ${esc(lvl[1])}</div>`;
+  if (r.step === 'rest') {
+    const nx = r.set < e.sets ? e : w.ex[r.ex];
+    box.innerHTML = `${prog}<div class="sp-k">Repos</div><div class="sp-big num">${mmss(r.t)}</div><div class="sp-h">Ensuite : ${esc(nx.name)}, série ${r.set + 1}/${nx.sets}</div>`;
+    act.innerHTML = `<button type="button" class="btn" data-act="spRest" data-v="15">+15 s</button><button type="button" class="btn pri" data-act="spRest" data-v="0">Je suis prêt</button>`;
+    return;
+  }
+  if (e.time) {
+    if (r.step !== 'timed') { r.step = 'timed'; r.t = lv.target; r.target = lv.target; r.going = false; }
+    box.innerHTML = `${head}<div class="sp-big num">${mmss(r.t)}</div><div class="sp-h">Objectif : ${lv.target} s${e.side ? ' de chaque côté' : ''}</div>`;
+    act.innerHTML = r.going ? `<button type="button" class="btn" data-act="spStopTimed">J’arrête là</button>` : `<button type="button" class="btn pri" data-act="spGoTimed">Démarrer</button>`;
+    return;
+  }
+  if (r.cur == null) r.cur = lv.target;
+  box.innerHTML = `${head}<div class="sp-h">Objectif : <b>${lv.target} reps</b>${e.side ? ' par côté' : ''}. Note ce que tu as vraiment fait.</div>
+    <div class="sp-step"><button type="button" class="btn" data-act="spRep" data-v="-1" aria-label="Une de moins">−</button><span class="sp-big num">${r.cur}</span><button type="button" class="btn" data-act="spRep" data-v="1" aria-label="Une de plus">+</button></div>`;
+  act.innerHTML = `<button type="button" class="btn pri" data-act="spSet">Série faite</button>`;
+}
+function sportLog(n) {
+  const r = sportRun, w = SP.workouts[r.wi], e = w.ex[r.ex];
+  (r.reps[e.id] = r.reps[e.id] || []).push(n);
+  r.cur = null; r.step = 'set'; r.set++;
+  if (r.set >= e.sets) { r.ex++; r.set = 0; }
+  if (r.ex >= w.ex.length) { sportFinish(); return; }
+  r.step = 'rest'; r.t = e.rest; sportPaint();
+}
+function sportFinish() {
+  clearInterval(sportTimer);
+  const r = sportRun, w = SP.workouts[r.wi]; sportRun = null;
+  beginChange();
+  const notes = w.ex.filter(e => r.reps[e.id]).map(e => { const p = L.sportProgress(state, e.id, r.reps[e.id]); return `<div class="st-row ok"><span class="st-n">${p && p.up ? '↑' : '='}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${r.reps[e.id].join(' · ')}${e.time ? ' s' : ''} → ${esc(p ? p.note : '')}</span></span></div>`; }).join('');
+  const dm = state.done[r.key] = state.done[r.key] || {};
+  if (r.id) dm[r.id] = { k: 'sport', m: Math.max(20, Math.round((Date.now() - r.startedAt) / 6e4)), w: w.id };
+  state.sportNext = (r.wi + 1) % SP.workouts.length;
+  state.sportLog = (state.sportLog || []).concat([{ at: Date.now(), w: w.id, reps: r.reps }]).slice(-40);
+  save(); renderAll(); endChange();
+  const box = $('#spBox'), act = $('#spAct');
+  if (box) box.innerHTML = `<div class="sp-k">Séance terminée</div><div class="sp-n">Bien joué 💪</div><div class="sp-h">Tes objectifs pour la prochaine fois :</div><div class="group">${notes}</div>`;
+  if (act) act.innerHTML = `<button type="button" class="btn pri" data-act="closeSheet">Fermer</button>`;
+}
+function sportAction(a, v, b) {
+  const r = sportRun;
+  switch (a) {
+    case 'sportSheet': sportSheet(b.dataset.w, b.dataset.id); return true;
+    case 'sportPick': { const key = b.dataset.w, id = b.dataset.id; sportStart(+v, key, id); return true; }
+    case 'sportGo': sportStart(+v, b.dataset.w, b.dataset.id); return true;
+    case 'spSkip': if (r) { r.step = 'set'; sportPaint(); } return true;
+    case 'spRest': if (r) { if (+v) r.t += +v; else r.step = 'set'; sportPaint(); } return true;
+    case 'spRep': if (r) { r.cur = Math.max(0, (r.cur || 0) + +v); sportPaint(); } return true;
+    case 'spSet': if (r) sportLog(r.cur || 0); return true;
+    case 'spGoTimed': if (r) { r.going = true; sportPaint(); } return true;
+    case 'spStopTimed': if (r) { r.going = false; sportLog(Math.max(0, r.target - r.t)); } return true;
+  }
+  return false;
+}
+
 /* ---------- Retard ---------- */
 const BL_TIMES = [[30, '30 min'], [60, '1h'], [90, '1h30'], [120, '2h'], [180, '3h'], [240, '4h'], [300, '5h']];
 function editBacklog(id) {
@@ -1272,21 +1460,25 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
   if (MUTATING.has(a)) beginChange();
+  if (/^(sport|sp)[A-Z]/.test(a) && sportAction(a, v, b)) return;
   if (/^m[ad][A-Z]/.test(a) && mdAction(a, v, b)) return;
   switch (a) {
     case 'roomAdd': roomSheet(v); return;
+    case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
     case 'wk': selDate = iso(addDays(fromIso(selDate), +v)); renderToday(); return;
     case 'done': {
       const wk = b.dataset.w, d = state.done[wk] = state.done[wk] || {};
-      if (d[v]) delete d[v];
+      if (d[v]) { delete d[v]; revForget(v); }
       else {
+        revRemember(wk, v);
         const days = L.generate(state, fromIso(wk)); let ev = null;
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
         d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
+        if (ev.kind === 'sport') { const wi = sportWorkoutOf(wk, v); d[v].w = SP.workouts[wi].id; state.sportNext = (wi + 1) % SP.workouts.length; }
         b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
       }
       save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;
