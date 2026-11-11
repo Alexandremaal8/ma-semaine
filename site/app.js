@@ -1853,7 +1853,7 @@ function widgetSheet() {
 
 function renderAll() { renderToday(); if (tab === 'cal') renderCal(); renderWeek(); renderSet(); renderBacklog(); if (tab === 'focus') renderFocus(); if (tab === 'sport') renderSport(); renderFocusBar(); }
 function showTab(t) {
-  tab = t;
+  tab = t; document.body.dataset.tab = t;
   document.querySelectorAll('.nav button').forEach(b => { if (b.dataset.tab === t) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + t));
   if (t === 'cal') renderCal(); if (t === 'today') renderToday(); if (t === 'set') renderSet(); if (t === 'week') renderWeek(); if (t === 'bl') renderBacklog(); if (t === 'focus') renderFocus(); if (t === 'sport') renderSport(); renderFocusBar();
