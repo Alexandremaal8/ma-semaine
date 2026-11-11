@@ -233,6 +233,10 @@ function normalize(s) {
   if (!out.autoModes || typeof out.autoModes !== 'object') out.autoModes = {};
   if (!out.rolled || typeof out.rolled !== 'object') out.rolled = {};
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
+  // keep about 5 months of week-by-week history: older weeks only make the app (and its sync) heavier
+  const cutoff = iso(addDays(mondayOf(new Date()), -7 * 20));
+  for (const k of ['done', 'frozen', 'weekModes', 'autoModes', 'serieDone', 'rolled', 'asked', 'serieEst', 'serieAi'])
+    if (out[k] && typeof out[k] === 'object') for (const wk of Object.keys(out[k])) if (/^\d{4}-\d{2}-\d{2}$/.test(wk) && wk < cutoff) delete out[k][wk];
   out.v = 10;
   return out;
 }
@@ -834,6 +838,22 @@ function generate(S0, weekStart, now) {
     blPlaced = live.filter(x => x.bl && x.state === 'todo').reduce((a, x) => a + x.len, 0);
   }
 
+  // close the holes: a block cut short during planning leaves a gap; the blocks still to come slide earlier
+  // (never into the past, never over a course, meal, routine or another block)
+  for (const x of days) {
+    const mine = live.filter(b => b.d === x.d).sort((a, b) => a.start - b.start);
+    const nowMin = x.date.getTime() <= nowT ? Math.ceil((nowT - x.date.getTime()) / 6e4 / 5) * 5 : -1;
+    const lo = Math.max(x.wake + 35, nowMin);
+    for (const b of mine) {
+      if (b.state !== 'todo' || b.frozen || b.kind2 === 'ahead' || b.startT <= nowT) continue;
+      const blocked = t => x.ev.some(e => e.end > e.start && e.kind !== 'free' && e.start < t + 5 && e.end > t) || mine.some(o => o !== b && o.start - (+m.pause) < t + 5 && o.end + (+m.pause) > t);
+      let t = b.start;
+      const len = b.end - b.start, fits = u => { for (let v = u; v < u + len; v += 5) if (blocked(v)) return false; return true; };
+      if (!x.courses.length) { for (let u = lo; u < b.start; u += 5) if (fits(u)) { t = u; break; } }   // days without courses: pack everything early, keep one big free stretch
+      else while (t - 5 >= lo && !blocked(t - 5)) t -= 5;
+      if (t < b.start) { const d = b.start - t; b.start -= d; b.end -= d; b.startT -= d * 6e4; b.endT -= d * 6e4; }
+    }
+  }
   for (const s of live) {
     const x = days[s.d];
     // a block shortened during planning may already be over
@@ -895,6 +915,13 @@ function generate(S0, weekStart, now) {
     x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
     x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);
   }
+  // which guided workout each sport block is (the A → B → C rotation continues where you left off)
+  { let k = 0; const next = S.sportNext || 0, dm = (S.done || {})[key] || {};
+    for (const x of days) for (const e of x.ev) if (e.kind === 'sport') {
+      const r = dm[e.id]; let wi = r && r.w ? SPORT.workouts.findIndex(w => w.id === r.w) : -1;
+      if (wi < 0 && !r) wi = (next + k++) % SPORT.workouts.length;
+      if (wi >= 0) { e.wi = wi; e.workout = SPORT.workouts[wi].name; }
+    } }
   const blNext = {}; for (const x of live) if (x.bl && x.state === 'todo' && (!blNext[x.bl] || x.startT < blNext[x.bl])) blNext[x.bl] = x.startT;
   days.meta = { unfinished, blPlaced, blNext, blTotal: blOpen.reduce((a, x) => a + x.left, 0), cfg, T, mustTotal, mustAllDone: mustTotal > 0 && mustNeeded === 0, carry, lateMin, extended, unplaced, mustLeftAfter, sportMin: sportMinutes(S) };
   return days;
@@ -942,7 +969,7 @@ function buildNotifications(S, now, horizonDays) {
         }
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
         if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start), 's' + e.id);
-        if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + ' à ' + fmt(e.start), 'Prends tes affaires, ça commence dans 10 min.', 'p' + e.id);
+        if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + (e.workout ? ' · ' + e.workout : '') + ' à ' + fmt(e.start), (e.workout ? 'Séance guidée dans l’app. ' : '') + 'Prends ta planche, ça commence dans 10 min.', 'p' + e.id);
         if (e.kind === 'routine' && N.routine) push(T(e.start), e.title, fmt(e.start) + '–' + fmt(e.end), 'r' + e.id);
         if (e.kind === 'event' && N.event > 0) push(T(e.start - N.event), e.title + ' à ' + fmt(e.start), (e.sub ? e.sub + ' · ' : '') + 'dans ' + N.event + ' min', 'e' + e.id);
       }

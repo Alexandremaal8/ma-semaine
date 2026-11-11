@@ -524,8 +524,8 @@ function renderToday() {
     const nxt = main.find(e => e.start > mins && !MINOR.has(e.kind));
     if (cur) {
       const p = Math.round((mins - cur.start) / (cur.end - cur.start) * 100);
-      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div><div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}</b></span></div>` : ''}</div>`;
-    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}${roomBtn(nxt)}</div></div>`;
+      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}${cur.workout ? ' · ' + esc(cur.workout) : ''}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div><div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</b></span></div>` : ''}</div>`;
+    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}${roomBtn(nxt)}</div></div>`;
     else hero = `<div class="hero quiet"><div class="k">C’est fini pour aujourd’hui</div><div class="t">Bonne soirée</div><div class="s">Au lit vers ${fmt(day.sleep)}.</div></div>`;
   }
   let late = '';
@@ -685,8 +685,14 @@ function proposal(ws, key, M, wmode) {
     return `<div class="prop"><b>La série de ${esc(su.name)} te prend plutôt ${hm(avg)}.</b><p>Les 2 dernières semaines : ${log.map(x => hm(x.m)).join(' et ')}, pour ${hm(su.serie)} prévues. J’ajuste le planning ?</p>
       <div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="serieAdjust" data-v="${esc(su.id)}" data-m="${avg}">Passer à ${hm(avg)}</button><button type="button" class="btn" data-act="dismiss" data-v="${id}">Garder ${hm(su.serie)}</button></div></div>`;
   }
-  // 3. things found on Moodle
-  return mdProposal();
+  // 3. things found on Moodle (time-sensitive), then the exam-dates nudge
+  // 3. exam session coming and no exam dates yet: the 6-week campaign can't start without them
+  let nudge = '';
+  if (!state.subjects.some(su => su.exam) && state.semEnd && !(state.dismiss || {})['examDates']) {
+    const left = (fromIso(state.semEnd) - fromIso(todayIso())) / 864e5;
+    if (left <= 45 && left >= -20) nudge = `<div class="prop"><b>Tes dates d’examens ?</b><p>La session approche. Avec les dates (IS-Academia → Mon plan d’examens), l’app lance 6 semaines avant chaque examen une campagne de révision en 3 passes, en tenant compte du Liban.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="editExam" data-v="${esc((state.subjects[0] || {}).id || '')}">Ajouter une date</button><button type="button" class="btn" data-act="dismiss" data-v="examDates">Plus tard</button></div></div>`;
+  }
+  return mdProposal() || nudge;
 }
 
 /* ---------- course rooms ---------- */
@@ -1205,12 +1211,8 @@ let sportTimer = null, sportRun = null;
 const SP = L.SPORT;
 // which workout each sport block of the week gets: the rotation continues where you left off
 function sportPlanFor(key, days) {
-  const out = {}; let k = 0; const next = state.sportNext || 0, dm = state.done[key] || {};
-  for (const x of days) for (const e of x.ev) if (e.kind === 'sport') {
-    if (dm[e.id] && dm[e.id].w) { out[e.id] = SP.workouts.findIndex(w => w.id === dm[e.id].w); continue; }
-    if (dm[e.id]) continue;
-    out[e.id] = (next + k++) % SP.workouts.length;
-  }
+  const out = {};
+  for (const x of days) for (const e of x.ev) if (e.kind === 'sport' && e.wi != null) out[e.id] = e.wi;
   return out;
 }
 function sportWorkoutOf(key, id) { const ws = fromIso(key); const p = sportPlanFor(key, L.generate(state, ws, new Date())); return p[id] != null && p[id] >= 0 ? p[id] : (state.sportNext || 0) % SP.workouts.length; }
@@ -1571,7 +1573,7 @@ document.addEventListener('click', async e => {
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
         d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
-        if (ev.kind === 'sport') { const wi = sportWorkoutOf(wk, v); d[v].w = SP.workouts[wi].id; state.sportNext = (wi + 1) % SP.workouts.length; }
+        if (ev.kind === 'sport') { const rec = d[v]; delete d[v]; const wi = sportWorkoutOf(wk, v); d[v] = rec; d[v].w = SP.workouts[wi].id; state.sportNext = (wi + 1) % SP.workouts.length; }
         b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
       }
       save(); setTimeout(() => keepScroll(() => { renderToday(); if (tab === 'cal') renderCal(); }), d[v] ? 420 : 0); return;
