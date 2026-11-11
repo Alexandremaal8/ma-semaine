@@ -96,3 +96,16 @@ console.log('exams OK');
   assert.ok(g.some(x => x.ev.some(e => e.kind === 'course' && e.subj === 'ana' && /Exercices/.test(e.sub))));
 }
 console.log('exo OK');
+{
+  // a focus running: notification when the planned time is up, or at each pomodoro phase; nothing while paused
+  const S6 = L.normalize(L.defaultState()); const t0 = new Date(2026, 10, 10, 11, 0).getTime();
+  S6.focus = { run: { title: 'Série 9', start: t0, paused: 5 * 6e4, pauseAt: null, plan: 50 }, log: [] };
+  let n = L.buildNotifications(S6, new Date(t0 + 60e3), 1).filter(x => x.tag === 'focus');
+  assert.deepEqual(n.map(x => [x.title, (x.at - t0) / 6e4]), [['Temps prévu écoulé', 55]]);
+  S6.focus.run.pomo = true; S6.focus.run.paused = 0;
+  n = L.buildNotifications(S6, new Date(t0 + 60e3), 1).filter(x => x.tag === 'focus');
+  assert.deepEqual(n.slice(0, 3).map(x => (x.at - t0) / 6e4), [25, 30, 55]);
+  S6.focus.run.pauseAt = t0 + 10 * 6e4;
+  assert.equal(L.buildNotifications(S6, new Date(t0 + 11 * 6e4), 1).filter(x => x.tag === 'focus').length, 0);
+}
+console.log('focus OK');
