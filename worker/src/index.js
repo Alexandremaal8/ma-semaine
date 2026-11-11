@@ -2,7 +2,7 @@
  * The app sends its upcoming notifications here; a cron every minute pushes the ones that are due.
  * Web Push (RFC 8030/8291/8292) implemented with WebCrypto only, no dependencies. */
 
-import { moodleRoute, refreshMoodle } from './moodle.js';
+import { moodleRoute, refreshMoodle, studySeries } from './moodle.js';
 
 const enc = new TextEncoder();
 const b64u = buf => { let s = ''; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
@@ -85,7 +85,7 @@ async function handle(req, env) {
     if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
     return json((await env.KV.get('store:' + k, 'json')) || { updated: 0, state: null });
   }
-  if (url.pathname === '/moodle' || url.pathname === '/moodle/file') { const r = await moodleRoute(req, env, url, json); if (r) return r; }
+  if (url.pathname === '/moodle' || url.pathname === '/moodle/file' || url.pathname === '/moodle/study') { const r = await moodleRoute(req, env, url, json); if (r) return r; }
   if (url.pathname === '/health') return json({ ok: true, subs: (await index(env)).length });
   if (req.method !== 'POST') return json({ error: 'not found' }, 404);
   const text = await req.text();
@@ -201,5 +201,6 @@ export default {
   scheduled: (event, env, ctx) => {
     ctx.waitUntil(tick(env, event.scheduledTime));
     if (new Date(event.scheduledTime).getUTCMinutes() === 7) ctx.waitUntil(moodleTick(env));
+    if (new Date(event.scheduledTime).getUTCMinutes() === 37) ctx.waitUntil((async () => { for (const k of (await env.KV.get('mlist', 'json')) || []) { try { await studySeries(env, k, 2); } catch (e) { } } })());
   }
 };

@@ -83,3 +83,16 @@ console.log('moodle OK');
   assert.equal(await analyzeAnnouncement({}, an, 'c'), null);   // no AI: the app falls back to its own reading
   console.log('moodle ai OK');
 }
+{
+  const { estimateSerie } = await import('../worker/src/moodle.js');
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async u => String(u).includes('token=tk') ? new Response(new Uint8Array([37, 80, 68, 70])) : new Response('no', { status: 403 });
+  const env = { AI: { toMarkdown: async () => [{ format: 'markdown', data: 'Exercice 1. Calculer la limite ... Exercice 2. Montrer que ... Exercice 3 (facultatif) ... '.repeat(3) }], run: async () => ({ response: 'Sure: {"exercises":3,"minutes":163,"per":[50,70,43],"topics":["Limites","Suites"],"hard":[2]}' }) } };
+  const est = await estimateSerie(env, 'tk', { file: 'https://moodle.epfl.ch/webservice/pluginfile.php/1/s.pdf', title: 'Série 9' });
+  assert.deepEqual([est.n, est.minutes, est.hard[0], est.topics[0]], [3, 165, 2, 'Limites']);
+  const scan = await estimateSerie({ AI: { toMarkdown: async () => [{ format: 'markdown', data: ' ' }], run: async () => ({}) } }, 'tk', { file: 'https://moodle.epfl.ch/webservice/pluginfile.php/1/s.pdf', title: 'x' });
+  assert.ok(scan.err);
+  assert.equal(await estimateSerie({}, 'tk', { file: 'x' }), null);   // no AI: nothing
+  globalThis.fetch = realFetch;
+  console.log('moodle study OK');
+}

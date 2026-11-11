@@ -181,6 +181,41 @@ async function understand(env, dig, old) {
   }
 }
 
+
+/* ---------- reading the séries themselves (PDF → text → time estimate) ---------- */
+const STUDY_PROMPT = `You estimate homework workload for a first-year EPFL student (Analyse, Algèbre linéaire, Physique, AICC, Programmation).
+You get the text of one weekly exercise sheet ("série"). Answer with ONE JSON object only:
+{"exercises": number of exercises, "minutes": total minutes a serious first-year student needs to solve the whole sheet without looking at solutions (realistic, usually 90-300), "per": [minutes per exercise, in order], "topics": ["2 to 5 short topics in French"], "hard": [numbers of the 1-2 hardest exercises]}
+Count sub-questions as part of their exercise. Optional/bonus exercises (marked "facultatif", "bonus", "*", "optional") count at half time. If the text is not an exercise sheet, answer {"exercises":0}.`;
+function cleanEst(o) {
+  if (!o || !(o.exercises > 0) || !(o.minutes > 0)) return null;
+  const n = Math.min(40, Math.round(o.exercises)), min = Math.max(30, Math.min(480, Math.round(o.minutes / 5) * 5));
+  const per = Array.isArray(o.per) ? o.per.slice(0, 40).map(x => Math.max(0, Math.min(240, Math.round(+x || 0)))) : [];
+  return { n, minutes: min, per, topics: (Array.isArray(o.topics) ? o.topics : []).slice(0, 5).map(t => String(t).slice(0, 50)), hard: (Array.isArray(o.hard) ? o.hard : []).slice(0, 3).map(x => +x).filter(x => x > 0), at: Date.now() };
+}
+export async function estimateSerie(env, token, item) {
+  if (!env.AI || typeof env.AI.toMarkdown !== 'function') return null;
+  const r = await fetch(item.file + (item.file.includes('?') ? '&' : '?') + 'token=' + token, { headers: UA });
+  if (!r.ok) return { err: 'HTTP ' + r.status, at: Date.now() };
+  const buf = await r.arrayBuffer(); if (buf.byteLength > 12e6) return { err: 'trop gros', at: Date.now() };
+  let md = await env.AI.toMarkdown({ name: 'serie.pdf', blob: new Blob([buf], { type: 'application/pdf' }) });
+  if (Array.isArray(md)) md = md[0];
+  const text = md && md.format !== 'error' ? String(md.data || '') : '';
+  if (text.trim().length < 80) return { err: 'PDF illisible (scanné ?)', at: Date.now() };
+  const out = await env.AI.run(AI_MODEL, { messages: [{ role: 'system', content: STUDY_PROMPT }, { role: 'user', content: 'Title: ' + item.title + '\n\n' + text.slice(0, 12000) }], max_tokens: 260, temperature: 0 });
+  const txt = typeof out === 'string' ? out : out && (typeof out.response === 'string' ? out.response : out.response ? JSON.stringify(out.response) : '');
+  const m = /\{[\s\S]*\}/.exec(txt || ''); if (!m) return { err: 'pas de réponse', at: Date.now() };
+  try { return cleanEst(JSON.parse(m[0])) || { err: 'pas une série', at: Date.now() }; } catch (e) { return { err: 'réponse illisible', at: Date.now() }; }
+}
+export async function studySeries(env, k, max = 2) {
+  const [cfg, dig] = await Promise.all([env.KV.get('mcfg:' + k, 'json'), env.KV.get('mdig:' + k, 'json')]);
+  if (!cfg || !cfg.token || !dig || !env.AI) return 0;
+  const todo = (dig.items || []).filter(i => i.kind === 'serie' && i.file && /pdf/i.test((i.mime || '') + i.file) && !i.est && i.time > Date.now() - 35 * 864e5).sort((a, b) => b.time - a.time).slice(0, max);
+  for (const it of todo) { try { it.est = await estimateSerie(env, cfg.token, it) || { err: 'indisponible', at: Date.now() }; } catch (e) { it.est = { err: String(e.message || e).slice(0, 80), at: Date.now() }; } }
+  if (todo.length) await env.KV.put('mdig:' + k, JSON.stringify(dig));
+  return todo.length;
+}
+
 const KEY_RE = /^[a-f0-9]{32,64}$/;
 export async function refreshMoodle(env, k, force) {
   const cfg = await env.KV.get('mcfg:' + k, 'json'); if (!cfg) return null;
@@ -201,6 +236,8 @@ export async function refreshMoodle(env, k, force) {
       const a = await readApi(cfg.token);
       Object.assign(dig, { user: a.user, courses: a.courses, items: a.items, announcements: a.announcements });
       await understand(env, dig, old);
+      const ests = {}; for (const i of (old && old.items) || []) if (i.est && i.file) ests[i.file] = i.est;
+      for (const i of dig.items || []) if (ests[i.file]) i.est = ests[i.file];
       // API events complete the iCal ones (same deadline may come from both: keep one)
       // events still waiting for you on Moodle (not submitted / not completed) are marked "todo"
       for (const e of a.events) { const same = dig.events.find(x => Math.abs(x.start - e.start) < 60e3 && x.title === e.title); if (same) same.todo = true; else dig.events.push(e); }
@@ -225,6 +262,12 @@ export async function moodleRoute(req, env, url, json) {
     const fname = (String(url.searchParams.get('n') || (it && it.nice) || 'document').replace(/[\\/:*?"<>|\n\r]+/g, ' ').trim().slice(0, 100) || 'document') + '.' + ext;
     const h = new Headers({ 'Content-Type': r.headers.get('Content-Type') || 'application/pdf', 'Content-Disposition': "inline; filename*=UTF-8''" + encodeURIComponent(fname), 'Cache-Control': 'private, max-age=3600', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Disposition' });
     return new Response(r.body, { status: r.status, headers: h });
+  }
+  if (url.pathname === '/moodle/study' && req.method === 'POST') {
+    const data = await req.json().catch(() => ({})); const k = String(data.k || '');
+    if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
+    const n = await studySeries(env, k, 2);
+    return json({ ok: true, read: n });
   }
   if (url.pathname === '/moodle' && req.method === 'GET') {
     const k = url.searchParams.get('k') || '';

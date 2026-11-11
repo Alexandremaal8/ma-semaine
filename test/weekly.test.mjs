@@ -56,3 +56,22 @@ console.log('projects OK');
   assert.equal(L.mockPrepBudget({ prio: 3 }), 210); assert.equal(L.mockPrepBudget({ prio: 2 }), 150);
 }
 console.log('sport OK');
+{
+  // a série read on Moodle replaces the usual time; no courses after the last day of the semester; exam passes
+  const S4 = L.normalize(L.defaultState()); S4.since = new Date(2026, 10, 1).getTime();
+  const ws4 = L.mondayOf(new Date(2026, 10, 9)), k4 = L.iso(ws4);
+  const before = L.generate(S4, ws4, ws4).meta.mustTotal;
+  S4.serieEst = { [k4]: { ana: 90 } };
+  assert.equal(L.generate(S4, ws4, ws4).meta.mustTotal, before - 90);   // analyse: 3h → 1h30
+  assert.equal(S4.semEnd, '2026-12-18');
+  assert.equal(L.coursesOnFor(S4, L.mondayOf(new Date(2026, 11, 14))), true);
+  assert.equal(L.coursesOnFor(S4, L.mondayOf(new Date(2027, 0, 4))), false);
+  S4.trips = [{ id: 't', title: 'Liban', from: '2026-12-20', to: '2027-01-02', light: 60 }];
+  S4.subjects[0].exam = '2027-01-26';
+  assert.deepEqual(['2026-12-16', '2027-01-12', '2027-01-25'].map(d => L.examPass(S4, '2027-01-26', L.fromIso(d))), [0, 1, 2]);
+  assert.ok(!L.examDays(S4, '2027-01-26').includes('2026-12-25'), 'trip days are not campaign days');
+  const g = L.generate(S4, L.mondayOf(new Date(2027, 0, 11)), L.mondayOf(new Date(2027, 0, 11)));
+  assert.ok(g.some(x => x.ev.some(e => /^Examen du 26 janv\. · passe/.test(e.title))), 'exam revision blocks named by pass');
+  assert.ok(!g.some(x => x.ev.some(e => /^Série/.test(e.title))), 'no séries after the semester');
+}
+console.log('exams OK');

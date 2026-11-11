@@ -36,6 +36,19 @@ const REV_LABELS = {
   exam: ['Annales / examen blanc', 'Révision active (fiches, flashcards)', 'Refaire les séries'], recup: ['Relire tranquillement']
 };
 const PRIO_W = [0, 1, 1.6, 2.3];
+/* official exams: a 6-week campaign in 3 passes (understand → practise → past exams in real conditions) */
+const EXAM_CAMPAIGN = 42;
+const EXAM_PASSES = [['passe 1 · comprendre', 'Relis le cours et refais 1-2 exos clés de la série'], ['passe 2 · s’entraîner', 'Refais les exos des séries sans regarder le corrigé'], ['passe 3 · anciens examens', 'Examen d’une autre année en conditions réelles, puis correction']];
+// the campaign days (trip days don't count); which pass a day belongs to
+function examDays(S, examIso) {
+  const ex = fromIso(examIso), out = [];
+  for (let d = addDays(ex, -EXAM_CAMPAIGN); d < ex; d = addDays(d, 1)) if (!tripOn(S, iso(d))) out.push(iso(d));
+  return out;
+}
+function examPass(S, examIso, date) {
+  const ds = examDays(S, examIso), i = ds.indexOf(iso(date)), f = i < 0 ? (date < fromIso(examIso) ? 0 : 1) : i / Math.max(1, ds.length);
+  return f < 0.45 ? 0 : f < 0.8 ? 1 : 2;
+}
 /* 5 minutes every morning: 5 gentle exercises, about 1 min each. Never force, never bounce, breathe slowly. */
 const STRETCH = [
   { name: 'Réveil du dos', moves: [
@@ -99,6 +112,8 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const dow = d => (d.getDay() + 6) % 7;
 const subjOf = (S, id) => S.subjects.find(x => x.id === id);
 /* Semester week ("semaine 9"): counted from S.semStart; the série of week N is série N */
+// time a série takes: the estimate read from that week's PDF (when Moodle gave one), else the subject's usual time
+const serieMinOf = (S, wk, su) => { if (!su || !su.serie) return 0; const e = ((S.serieEst || {})[wk] || {})[su.id]; return e > 0 ? e : +su.serie || 0; };
 function semWeek(S, weekStart) {
   if (!S.semStart) return null;
   const n = Math.round((mondayOf(weekStart) - mondayOf(fromIso(S.semStart))) / (7 * 864e5)) + 1;
@@ -109,7 +124,7 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 10, semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 10, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -198,6 +213,7 @@ function normalize(s) {
       if (!Array.isArray(out.weekly)) out.weekly = [{ id: uid(), subj: prog.id, title: 'MOOC de prog · 1re heure', minutes: 60, before: 2 }];
     }
   }
+  if (!out.semEnd && (out.semStart || '') === '2026-09-14') out.semEnd = '2026-12-18';
   if ((old.v || 0) < 10) {
     // v9 → v10: the prog "exam" of 25 Nov is in fact Mini-projet 2, a group project from 25 Nov to 17 Dec
     const prog = (out.subjects || []).find(x => x.id === 'prog' || /programm/i.test(x.name));
@@ -227,7 +243,9 @@ function tripOn(S, dIso) {
   return null;
 }
 function tripDaysIn(S, weekStart) { let n = 0; for (let d = 0; d < 7; d++) if (tripOn(S, iso(addDays(weekStart, d)))) n++; return n; }
-function coursesOnFor(S, weekStart) { return !(S.noCourseWeeks || []).includes(iso(weekStart)) && tripDaysIn(S, weekStart) < 3; }
+// courses only run during the semester (semStart → semEnd); outside it every week is a work week
+function inSemester(S, weekStart) { const we = iso(addDays(weekStart, 4)), ws = iso(weekStart); return !(S.semStart && we < S.semStart) && !(S.semEnd && ws > S.semEnd); }
+function coursesOnFor(S, weekStart) { return inSemester(S, weekStart) && !(S.noCourseWeeks || []).includes(iso(weekStart)) && tripDaysIn(S, weekStart) < 3; }
 const examsWithin = (S, from, days) => S.subjects.filter(su => su.exam && (fromIso(su.exam) - from) / 864e5 >= 0 && (fromIso(su.exam) - from) / 864e5 < days);
 
 /* What the app would pick by itself for a week, with the reason. Order matters: exams first, then trips, then backlog. */
@@ -449,7 +467,7 @@ function carryOver(S, weekStart) {
   if (!S.done[prevKey] || !coursesOnFor(S, addDays(weekStart, -7))) return {};
   const done = doneBySubject(S, prevKey).by, out = {};
   const pws = addDays(weekStart, -7);
-  for (const su of S.subjects) { const left = (su.serie || 0) + (su.serie && !corrDeferred(S, pws, su) ? (su.corr || 0) : 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
+  for (const su of S.subjects) { const left = serieMinOf(S, iso(pws), su) + (su.serie && !corrDeferred(S, pws, su) ? (su.corr || 0) : 0) - (done[su.id] || 0); if (left >= 20) out[su.id] = Math.round(left); }
   return out;
 }
 
@@ -478,7 +496,7 @@ function generate(S0, weekStart, now) {
     const av = corrAvail(S0, weekStart, su);
     corrFrom[su.id] = fromPrev && !(S.coursesOn && su.serie && !deferred) ? null : (av && !deferred ? av : null);
     const sDone = !!((S.serieDone || {})[key] || {})[su.id];
-    const v = (S.coursesOn && !sDone ? (+su.serie || 0) : 0) + c + (carry[su.id] || 0);
+    const v = (S.coursesOn && !sDone ? serieMinOf(S, key, su) : 0) + c + (carry[su.id] || 0);
     corr[su.id] = c;
     if (v > 0) { must[su.id] = v; mustTotal += v; }
   }
@@ -560,7 +578,7 @@ function generate(S0, weekStart, now) {
     const mk = (S.mocks || []).find(x => x.subj === subj && x.date && fromIso(x.date) >= date && (fromIso(x.date) - date) / 864e5 <= 10);
     if (mk) return 'Révision pour l’examen blanc (' + DAYS[dow(fromIso(mk.date))].toLowerCase() + ' ' + fromIso(mk.date).getDate() + ')';
     const su = subjOf(S, subj);
-    if (su && su.exam && fromIso(su.exam) >= date && (fromIso(su.exam) - date) / 864e5 <= 28) return 'Révision pour l’examen du ' + dateLbl(fromIso(su.exam));
+    if (su && su.exam && fromIso(su.exam) > date && (fromIso(su.exam) - date) / 864e5 <= EXAM_CAMPAIGN) return 'Examen du ' + dateLbl(fromIso(su.exam)) + ' · ' + EXAM_PASSES[examPass(S, su.exam, date)][0];
     return null;
   };
   const prevCourse = (s) => days[s.d].courses.find(c => c.end <= s.start && c.end >= s.start - 60 && c.type === 'Cours');
@@ -1117,6 +1135,6 @@ function sportProgress(S, id, done) {
   return { lvl, target, note, up: lvl > cur.lvl || target > cur.target };
 }
 
-const API = { mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

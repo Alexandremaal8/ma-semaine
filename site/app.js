@@ -367,8 +367,12 @@ function modeSheet(wk) {
   openSheet('Semaine du ' + dateLbl(fromIso(wk)), `
     <div class="group" style="margin-bottom:12px"><label class="row-sw"><span class="bd"><span class="ti">J’ai cours cette semaine</span><span class="su">Sinon : semaine de travail sans cours, ni séries</span></span><input type="checkbox" class="sw" data-courses="${wk}" ${cfg.coursesOn ? 'checked' : ''}${cfg.tripDays >= 3 ? ' disabled' : ''}></label></div>
     <div class="modes" role="radiogroup">
-      <button type="button" class="mopt" role="radio" aria-checked="${!manual}" data-act="setMode" data-v="auto" data-w="${wk}" style="--m:var(--ink)"><span class="sw8"></span><span><b>Automatique <em class="badge" style="--m:var(--ink)">conseillé</em></b><small>L’app choisit pour toi : ${autoLine(wk)}. Elle passe aussi en Rattrapage toute seule si le retard ne rentre plus.</small></span></button>
-      ${MODE_ORDER.map(k => `<button type="button" class="mopt" role="radio" aria-checked="${manual && k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}</b><small>${esc(MODE_META[k].tag)}${k === 'exam' && noExam ? ' <b style="display:inline;color:var(--warn)">Ajoute d’abord tes dates d’examen.</b>' : ''}</small></span></button>`).join('')}
+      <button type="button" class="mopt" role="radio" aria-checked="${!manual}" data-act="setMode" data-v="auto" data-w="${wk}" style="--m:var(--ink)"><span class="sw8"></span><span><b>Automatique <em class="badge" style="--m:var(--ink)">conseillé</em></b><small>L’app choisit pour toi : ${autoLine(wk).replace(/\.$/, "")}. Elle passe aussi en Rattrapage toute seule si le retard ne rentre plus.</small></span></button>
+      ${['chill', 'normal', 'charbon', 'recup'].map(k => `<button type="button" class="mopt" role="radio" aria-checked="${manual && k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}</b><small>${esc(MODE_META[k].tag)}${k === 'exam' && noExam ? ' <b style="display:inline;color:var(--warn)">Ajoute d’abord tes dates d’examen.</b>' : ''}</small></span></button>`).join('')}
+    </div>
+    <details class="more" style="margin-top:10px;border:0"${manual && ['avance', 'rattrapage', 'exam'].includes(cfg.mode) ? ' open' : ''}><summary style="padding:8px 2px">Situations spéciales <small style="color:var(--muted);font-weight:500">· l’app les met toute seule quand il faut</small></summary><div class="modes" role="radiogroup">
+      ${['avance', 'rattrapage', 'exam'].map(k => `<button type="button" class="mopt" role="radio" aria-checked="${manual && k === cfg.mode}" data-act="setMode" data-v="${k}" data-w="${wk}" style="--m:${MODE_COLORS[k]}"><span class="sw8"></span><span><b>${MODE_META[k].name}</b><small>${esc(MODE_META[k].tag)}${k === 'exam' && noExam ? ' <b style="display:inline;color:var(--warn)">Ajoute d’abord tes dates d’examen.</b>' : ''}</small></span></button>`).join('')}
+    </div></details><div>
     </div>
     <div class="day-actions"><button type="button" class="linkbtn" data-act="weekendOff" data-v="${wk}">${state.offDays.includes(iso(addDays(fromIso(wk), 5))) && state.offDays.includes(iso(addDays(fromIso(wk), 6))) ? 'Annuler le week-end off' : 'Prendre le week-end off'}</button><button type="button" class="linkbtn" data-act="tuneMode" data-v="${cfg.mode}">Ajuster le mode ${esc(MODE_META[cfg.mode].name)}</button></div>
     <p class="hint" style="text-align:center;margin-top:12px">Tu peux changer en pleine semaine : ce qui est passé ne bouge pas, seul ce qui reste s’adapte.</p>`);
@@ -403,7 +407,9 @@ function hoursSheet() {
     ${F.time('wake', 'Réveil lun–ven', state.wake)}${F.time('sleep', 'Coucher (sauf samedi)', state.sleep)}
     ${F.time('wakeWE', 'Réveil week-end', state.wakeWE)}${F.time('sleepSat', 'Coucher samedi soir', state.sleepSat % 1440)}
     ${F.select('semw', 'Semaine du semestre en ce moment', Array.from({ length: 16 }, (_, i) => [i + 1, 'Semaine ' + (i + 1)]), L.semWeek(state, mondayOf(new Date())) || 9)}
-  </div><p class="hint" style="margin-top:10px">Sert à nommer les séries : en semaine 9, c’est la série 9.</p>${actions(false)}`, fd => {
+    ${F.date('semEnd', 'Dernier jour de cours du semestre', state.semEnd || '')}
+  </div><p class="hint" style="margin-top:10px">Sert à nommer les séries (en semaine 9, c’est la série 9). Après le dernier jour de cours, plus de cours ni de séries : les semaines deviennent des semaines de révision.</p>${actions(false)}`, fd => {
+    if (fd.semEnd !== undefined) state.semEnd = fd.semEnd || '';
     if (fd.semw) state.semStart = iso(addDays(mondayOf(new Date()), -7 * (+fd.semw - 1)));
     for (const k of ['wake', 'sleep', 'wakeWE', 'sleepSat']) { let v = parseT(fd[k]); if (v == null) continue; if (k.startsWith('sleep') && v < 240) v += 1440; state[k] = v; }
     return done();
@@ -569,7 +575,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${e.kind === 'course' && !e.room ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key)}${mdBlockLinks(e, key)}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${e.kind === 'course' && !e.room ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key, sel, day.ev)}${mdBlockLinks(e, key)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -649,6 +655,7 @@ function ciAnswer(f) {
   const c = ciQueue.shift(); if (!c) return;
   if (f > 0) {
     if (/examen blanc/.test(c.e.title || '')) revRemember(c.wk, c.id, f);
+    if (/^Examen du /.test(c.e.title || '')) examRemember(c.wk, c.id, f);
     const d = state.done[c.wk] = state.done[c.wk] || {}, e = c.e, len = e.end - e.start;
     d[c.id] = { s: e.subj, t: e.title, m: Math.round(len * f), d: dow(c.date), a: e.start, serie: e.serie, c: !!e.corr || undefined, b: e.bl || undefined, p: f < 1 ? f : undefined };
   } else { state.asked = state.asked || {}; (state.asked[c.wk] = state.asked[c.wk] || {})[c.id] = 1; }
@@ -803,9 +810,35 @@ function mdFeed() {
   const ann = (moodle.announcements || []).filter(a => a.time > since).map(a => ({ id: 'a' + a.course + '-' + a.time + a.title.slice(0, 20), t: a.time, subj: mdCourseSubj(a.course), title: a.title, text: a.ai && a.ai.summary ? a.ai.summary : a.text, tag: 'Annonce', annId: annKey(a) }));
   return items.concat(ann).filter(x => !dis['mf:' + x.id]).sort((a, b) => b.t - a.t).slice(0, 5);
 }
+// séries read on Moodle: their estimated time replaces the usual one, adjusted to how fast you really are
+function serieRatio(subj) {
+  const r = [];
+  for (const x of ((state.serieLog || {})[subj] || [])) { const ai = ((state.serieAi || {})[x.wk] || {})[subj]; if (ai > 0 && x.m > 0) r.push(x.m / ai); }
+  if (r.length < 2) return 1;
+  r.sort((a, b) => a - b); return Math.max(0.6, Math.min(1.6, r[Math.floor(r.length / 2)]));
+}
+function mdEstimates() {
+  if (!mdApi()) return [];
+  const changed = [];
+  for (const ws of [mondayOf(new Date()), addDays(mondayOf(new Date()), 7)]) {
+    const wk = iso(ws); if (!L.coursesOnFor(state, ws)) continue;
+    const n = L.semWeek(state, ws);
+    for (const su of state.subjects) {
+      if (!su.serie || ((state.serieDone || {})[wk] || {})[su.id]) continue;
+      const it = mdFiles(su.id).find(i => i.kind === 'serie' && i.num === n && i.est && i.est.minutes > 0); if (!it) continue;
+      state.serieAi = state.serieAi || {}; (state.serieAi[wk] = state.serieAi[wk] || {})[su.id] = it.est.minutes;
+      const mine = Math.max(45, Math.min(360, Math.round(it.est.minutes * serieRatio(su.id) / 5) * 5));
+      state.serieEst = state.serieEst || {}; const m = state.serieEst[wk] = state.serieEst[wk] || {};
+      if (m[su.id] !== mine) { m[su.id] = mine; changed.push(su.name + ' ≈ ' + hm(mine)); }
+    }
+  }
+  for (const k of Object.keys(state.serieEst || {}).sort().slice(0, -6)) { delete state.serieEst[k]; if (state.serieAi) delete state.serieAi[k]; }
+  return changed;
+}
 // a corrigé published earlier than planned moves the correction forward, automatically
 function mdApply() {
   if (!moodle || !moodle.ok || !moodle.ok.api) return;
+  { const before = JSON.stringify(state.serieEst || {}); beginChange(); const ch = mdEstimates(); if (ch.length && JSON.stringify(state.serieEst || {}) !== before) { save(); renderAll(); endChange('Séries lues sur Moodle', 'Durées estimées d’après les PDF : ' + ch.join(', ') + '. Ton planning est recalé.'); } }
   const done = []; state.corrSeen = state.corrSeen || {};
   for (const i of moodle.items || []) {
     if (i.kind !== 'correction' || i.time < Date.now() - 10 * 864e5) continue;
@@ -866,11 +899,13 @@ function mdFileFor(e, wk) {
 function mdBlockLinks(e, wk) {
   if (!mdApi() || !e.subj) return '';
   const out = [], n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0);
+  let estLine = '';
+  if (e.serie && !e.corr) { const f0 = mdPick(e.subj, 'serie', n, wk); const es = f0 && f0.est; if (es && es.minutes) estLine = `<div class="su rev">${es.n} exercice${es.n > 1 ? 's' : ''} · ≈ ${hm(Math.max(45, Math.min(360, Math.round(es.minutes * serieRatio(e.subj) / 5) * 5)))} pour toi${es.hard && es.hard.length ? ' · plus dur : exo ' + es.hard.join(', ') : ''}${es.topics && es.topics.length ? '<br>' + esc(es.topics.join(' · ')) : ''}</div>`; }
   const f = mdFileFor(e, wk); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
   if (e.corr) { const sf = mdPick(e.subj, 'serie', n, wk); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Énoncé</button>`); }
   const study = e.kind === 'study' || e.kind === 'course';
   if (study && mdFiles(e.subj).length && (!f || e.kind === 'course' || !(e.serie || e.corr))) out.push(`<button type="button" class="linkbtn mini" data-act="mdDocs" data-v="${esc(e.subj)}">Documents du cours</button>`);
-  return out.length ? `<div class="md-links">${out.join('')}</div>` : '';
+  return estLine + (out.length ? `<div class="md-links">${out.join('')}</div>` : '');
 }
 function mdDocsSheet(subj) {
   const su = subjOf(state, subj), fs = mdFiles(subj);
@@ -986,7 +1021,7 @@ function mdAction(a, v, b) {
   if (a === 'mdRename') { mdRename(v, b.dataset.s); return true; }
   if (a === 'mdDocsPick') { mdDocsPick(); return true; }
   if (a === 'mdCopyLaunch') { copyText('https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https', 'Lien copié : colle-le dans Safari'); return true; }
-  if (a === 'mdRefresh') { mdFetch(true).then(d => toast(d && !d.error ? 'Moodle à jour' : 'Moodle injoignable pour l’instant')); return true; }
+  if (a === 'mdRefresh') { (async () => { const d = await mdFetch(true); if (d && !d.error && mdApi()) { await post('/moodle/study', { k: syncKey() }).catch(() => { }); await mdFetch(true); } toast(d && !d.error ? 'Moodle à jour' : 'Moodle injoignable pour l’instant'); })(); return true; }
   if (a === 'mdOff') { post('/moodle', { k: syncKey(), remove: true }).catch(() => { }); state.moodleOn = false; moodle = null; lsSet(MD_LS, null); save(); renderAll(); toast('Moodle déconnecté'); return true; }
   const e = mdEvents().find(x => x.uid === v); if (!e) return a.startsWith('md');
   beginChange();
@@ -1081,7 +1116,62 @@ function revPlan(subj, mockIso) {
   });
   return { topics, plan, mk };
 }
-function revLine(e, key) {
+// official exams: 3 passes over the whole material; each block takes the next topics not done yet in its pass
+function examTopics(subj, examIso, pass) {
+  const base = revTopics(subj, examIso).filter(t => !t.last);
+  if (pass === 0) return base.map(t => ({ label: t.label, sub: 'cours + 1-2 exos clés', files: t.files }));
+  if (pass === 1) return base.map(t => ({ label: t.label, sub: 'exos des séries sans corrigé', files: t.files }));
+  const ex = mdFiles(subj).filter(i => i.kind === 'exam');
+  const list = ex.length ? ex.map(i => ({ label: mdName(i), sub: 'en conditions réelles, puis correction', files: [i.file] })) : [1, 2, 3].map(k => ({ label: 'Ancien examen n°' + k, sub: 'en conditions réelles, puis correction', files: [] }));
+  return list.concat([{ label: 'Points faibles', sub: 'refais les exos ratés des examens', files: [] }]);
+}
+function examPlanFor(e, x, dayEv) {
+  const su = subjOf(state, e.subj); if (!su || !su.exam) return null;
+  const pass = L.examPass(state, su.exam, x), topics = examTopics(e.subj, su.exam, pass), k = e.subj + ':' + su.exam + ':' + pass;
+  const done = new Set(((state.examDone || {})[k]) || []);
+  const mine = ((state.examBlk || {})[e.id]);
+  if (mine && mine.k === k) return { su, pass, topics, idx: mine.idx, k, done, mine: true };
+  // how fast to go: what's left of this pass over the campaign days left in it
+  const ds = L.examDays(state, su.exam), from = ds.indexOf(iso(x)), passEnd = Math.floor(ds.length * [0.45, 0.8, 1][pass]);
+  const daysLeft = Math.max(1, passEnd - Math.max(0, from)), left = topics.map((t, i) => i).filter(i => !done.has(i));
+  const per = Math.max(1, Math.ceil(left.length / daysLeft));
+  // several blocks the same day take consecutive topics
+  const same = (dayEv || []).filter(z => z.kind === 'study' && z.subj === e.subj && /^Examen du /.test(z.title) && !(state.examBlk || {})[z.id] && z.state !== 'done').sort((a, b) => a.start - b.start);
+  const rank = Math.max(0, same.findIndex(z => z.id === e.id)), perBlock = Math.max(1, Math.ceil(per / Math.max(1, same.length)));
+  const at = Math.min(rank * perBlock, Math.max(0, left.length - perBlock));
+  return { su, pass, topics, idx: left.slice(at, at + perBlock), k, done };
+}
+function examLine(e, x, dayEv) {
+  const p = examPlanFor(e, x, dayEv); if (!p) return '';
+  const ts = p.idx.map(i => p.topics[i]);
+  const prog = `Passe ${p.pass + 1}/3 · ${p.done.size}/${p.topics.length} fait${p.done.size > 1 ? 's' : ''}`;
+  if (!ts.length) return `<div class="su rev"><b>${prog}.</b> Cette passe est finie : refais ce qui t’a posé problème.</div>`;
+  const hasFiles = ts.some(t => t.files.length);
+  return `<div class="su rev"><b>À réviser :</b> ${esc(ts.map(t => t.label + ' (' + t.sub + ')').join(', '))}</div><div class="su rev">${prog}</div>${hasFiles ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="exDocs" data-v="${esc(e.id)}" data-w="${esc(iso(mondayOf(x)))}">Docs à réviser</button></div>` : ''}`;
+}
+function examRemember(wk, id, part) {
+  const days = L.generate(state, fromIso(wk)); let e = null, x = null;
+  let dev = null; for (const dd of days) { const f = dd.ev.find(z => z.id === id); if (f) { e = f; x = dd.date; dev = dd.ev; break; } }
+  if (!e || !/^Examen du /.test(e.title)) return;
+  const p = examPlanFor(e, x, dev); if (!p || !p.idx.length) return;
+  const idx = part != null && part < 1 ? p.idx.slice(0, Math.floor(p.idx.length * part)) : p.idx;
+  state.examDone = state.examDone || {}; state.examBlk = state.examBlk || {};
+  state.examDone[p.k] = [...new Set((state.examDone[p.k] || []).concat(idx))];
+  state.examBlk[id] = { k: p.k, idx };
+}
+function examForget(id) {
+  const b = (state.examBlk || {})[id]; if (!b) return;
+  state.examDone[b.k] = (state.examDone[b.k] || []).filter(i => !b.idx.includes(i)); delete state.examBlk[id];
+}
+function exDocsSheet(id, wk) {
+  const days = L.generate(state, fromIso(wk)); let e = null, x = null;
+  let dev = null; for (const dd of days) { const f = dd.ev.find(z => z.id === id); if (f) { e = f; x = dd.date; dev = dd.ev; break; } }
+  const p = e && examPlanFor(e, x, dev); if (!p) return;
+  const items = (moodle && moodle.items) || [];
+  openSheet('À réviser', p.idx.map(i => p.topics[i]).map(t => `<div class="sec-t" style="margin:12px 0 6px">${esc(t.label)}</div><div class="group">${t.files.map(f => { const it = items.find(z => z.file === f); return it ? `<button type="button" class="li" data-act="mdOpen" data-v="${esc(f)}"><span class="bd"><span class="ti">${esc(mdName(it))}</span></span>${CHEV}</button>` : ''; }).join('') || '<div class="empty">Pas de document.</div>'}</div>`).join(''), () => true);
+}
+function revLine(e, key, xdate, dayEv) {
+  if (e.kind === 'study' && e.subj && /^Examen du /.test(e.title) && xdate) return examLine(e, xdate, dayEv);
   if (e.kind !== 'study' || !e.subj || !/examen blanc/.test(e.title)) return '';
   const m = /\((\S+) (\d{1,2})\)/.exec(e.title); const mock = (state.mocks || []).filter(x => x.subj === e.subj && x.date >= key).sort((a, b) => a.date < b.date ? -1 : 1).find(x => fromIso(x.date).getDate() === +(m ? m[2] : -1));
   if (!mock) return '';
@@ -1465,15 +1555,16 @@ document.addEventListener('click', async e => {
   switch (a) {
     case 'roomAdd': roomSheet(v); return;
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
+    case 'exDocs': exDocsSheet(v, b.dataset.w); return;
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
     case 'wk': selDate = iso(addDays(fromIso(selDate), +v)); renderToday(); return;
     case 'done': {
       const wk = b.dataset.w, d = state.done[wk] = state.done[wk] || {};
-      if (d[v]) { delete d[v]; revForget(v); }
+      if (d[v]) { delete d[v]; revForget(v); examForget(v); }
       else {
-        revRemember(wk, v);
+        revRemember(wk, v); examRemember(wk, v);
         const days = L.generate(state, fromIso(wk)); let ev = null;
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
