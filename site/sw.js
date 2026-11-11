@@ -30,7 +30,7 @@ self.addEventListener('push', e => {
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const tag = e.notification.tag || '', open = /^stretch/.test(tag) ? 'stretch' : /^focus/.test(tag) ? 'focus' : '';
+  const tag = e.notification.tag || '', open = /^stretch/.test(tag) ? 'stretch' : /^focus/.test(tag) ? 'focus' : /^sport/.test(tag) ? 'sport' : '';
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
     for (const c of cs) if ('focus' in c) { if (open) c.postMessage({ open }); return c.focus(); }
     return self.clients.openWindow(open ? './#ouvrir-' + open : './');

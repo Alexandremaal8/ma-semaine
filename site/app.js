@@ -146,7 +146,7 @@ function openSheet(title, html, onSubmit) {
   $('#sheetBg').classList.add('on');
   document.body.style.overflow = 'hidden';
 }
-function closeSheet() { clearInterval(stretchTimer); if (ciOpen) { ciOpen = false; ciQueue = []; ciSkipUntil = Date.now() + 2 * 3600e3; setTimeout(() => { renderAll(); endChange(); }, 0); } $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; }
+function closeSheet() { clearInterval(stretchTimer); if (ciOpen) { ciOpen = false; ciQueue = []; ciSkipUntil = Date.now() + 2 * 3600e3; setTimeout(() => { renderAll(); endChange(); }, 0); } $('#sheetBg').classList.remove('on'); document.body.style.overflow = ''; sheetSubmit = null; if (typeof sportRun !== 'undefined' && sportRun) setTimeout(renderSportBar, 50); }
 $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
 $('#shBody').addEventListener('submit', e => { e.preventDefault(); if (sheetSubmit) { beginChange(); const fd = Object.fromEntries(new FormData(e.target).entries()); if (sheetSubmit(fd, e.submitter) !== false) closeSheet(); } });
 
@@ -435,6 +435,7 @@ function weekSheet() {
       <div class="stat${M.lateMin ? ' warn' : ''}"><div class="k">Pas fait (replacé)</div><div class="v">${hm(M.lateMin)}</div></div>
       <div class="stat${sm.sleepAvg < 450 ? ' warn' : ''}"><div class="k">Sommeil moyen</div><div class="v">${hm(sm.sleepAvg)}</div></div>
       <div class="stat"><div class="k">Sport prévu</div><div class="v">${hm(sm.sport)}</div></div>
+      ${(() => { const fl = ((state.focus || {}).log || []).filter(x => x.at >= ws.getTime() && x.at < addDays(ws, 7).getTime()); const fm = Math.round(fl.reduce((a, x) => a + x.ms, 0) / 6e4); const sp = (state.sportLog || []).filter(x => x.at >= ws.getTime() && x.at < addDays(ws, 7).getTime()).length; return (fm ? `<div class="stat"><div class="k">Focus chronométré</div><div class="v">${hm(fm)}</div><div class="hint" style="padding:0">${fl.length} session${fl.length > 1 ? 's' : ''}</div></div>` : '') + (sp ? `<div class="stat"><div class="k">Séances de sport</div><div class="v">${sp}</div></div>` : ''); })()}
     </div>
     ${alerts.map(a => `<div class="alert">${esc(a)}</div>`).join('')}
     <div class="sec-t" style="margin-top:20px">Par matière</div>
@@ -582,7 +583,8 @@ function renderToday() {
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
   const prop = thisWeek ? proposal(ws, key, M, wmode) : '';
-  $('#todayBody').innerHTML = `${pickWeek}${hero}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
+  const news = isToday && APP === 'main' && !(state.dismiss || {})['news-focus'] ? `<div class="news"><b>Nouveau : Focus et Sport</b><p><b>Focus</b> : touche ▶ sur un bloc, le chrono tourne (même app fermée) et le vrai temps recale ton planning. Pomodoro en option, stats dans Ma semaine.<br><b>Sport</b> : ta prochaine séance, tes progrès exercice par exercice, tes records et l’historique.<br>Les deux peuvent avoir leur propre icône sur l’écran d’accueil.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-tab-go="focus">Ouvrir Focus</button><button type="button" class="btn" data-tab-go="sport">Sport</button><button type="button" class="btn" data-act="icons">Icônes</button><button type="button" class="btn" data-act="dismiss" data-v="news-focus">OK</button></div></div>` : '';
+  $('#todayBody').innerHTML = `${pickWeek}${hero}${news}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
     ${isToday ? mdFeedCard() + mdTodayCard() : ''}
     <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
@@ -1213,6 +1215,22 @@ function revForget(id) { for (const k of Object.keys(state.revDone || {})) delet
  * and at the end the real time is what counts: the block is ticked with the minutes you actually spent,
  * so the planner learns your real pace. */
 let focusTick = null;
+/* keep the screen on and make a short sound at the end of a phase (only while the app is open) */
+let wakeLock = null, audioCtx = null, foLastPhase = '';
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
+    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) { wakeLock = null; }
+}
+function unlockAudio() { try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) { } }
+function beep(n = 1, hz = 880) {
+  try {
+    if (!audioCtx) return; const t0 = audioCtx.currentTime;
+    for (let i = 0; i < n; i++) { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = hz; o.connect(g); g.connect(audioCtx.destination); const t = t0 + i * 0.28; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2); o.start(t); o.stop(t + 0.22); }
+  } catch (e) { }
+  if (navigator.vibrate) navigator.vibrate(n > 1 ? [200, 120, 200] : 200);
+}
 const FO = () => (state.focus = state.focus || { run: null, log: [] });
 const foRun = () => (state.focus || {}).run || null;
 const foElapsed = r => r ? Math.max(0, ((r.pauseAt || Date.now()) - r.start - (r.paused || 0))) : 0;
@@ -1234,6 +1252,7 @@ function foStart(opt) {
   const cur = foRun();
   if (cur) { toast('Un focus tourne déjà : termine-le d’abord'); foOpen(); return; }
   beginChange();
+  unlockAudio(); keepAwake(true); foLastPhase = '';
   FO().run = { id: opt.id || null, wk: opt.wk || null, subj: opt.subj || null, title: opt.title || 'Focus libre', plan: opt.plan || 0, start: Date.now(), paused: 0, pauseAt: null, pomo: !!opt.pomo, fixed: !!opt.fixed };
   save(); endChange(); foOpen(); renderFocusBar();
 }
@@ -1243,7 +1262,7 @@ function foStop(finished) {
   const r = foRun(); if (!r) return;
   const ms = foElapsed(r), min = Math.max(1, Math.round(ms / 6e4));
   beginChange();
-  const f = FO(); f.run = null;
+  const f = FO(); f.run = null; keepAwake(false);
   f.log = (f.log || []).concat([{ at: r.start, end: Date.now(), wk: r.wk, id: r.id, subj: r.subj, title: r.title, ms, plan: r.plan || 0, fin: !!finished }]).slice(-400);
   if (min >= 3) {
     const wk = r.wk || iso(mondayOf(new Date(r.start)));
@@ -1263,7 +1282,7 @@ function foStop(finished) {
   save(); renderAll(); endChange(min >= 3 ? 'Focus enregistré' : 'Focus arrêté', min >= 3 ? `${esc(r.title)} · ${hm(min)} de vrai travail${r.plan ? ' (prévu ' + hm(r.plan) + ')' : ''}. Ton planning tient compte du temps réel.` : 'Moins de 3 min : rien d’enregistré.');
   foPaint(); renderFocusBar();
 }
-function foCancel() { const r = foRun(); if (!r) return; FO().run = null; save(); foPaint(); renderFocusBar(); toast('Focus annulé, rien d’enregistré'); }
+function foCancel() { const r = foRun(); if (!r) return; FO().run = null; keepAwake(false); save(); foPaint(); renderFocusBar(); toast('Focus annulé, rien d’enregistré'); }
 // what to start now: the block in progress, else the next one today
 function foSuggest() {
   const now = new Date(), wk = iso(mondayOf(now)), days = L.generate(state, mondayOf(now)), x = days[dow(now)], mins = now.getHours() * 60 + now.getMinutes();
@@ -1279,7 +1298,7 @@ function renderFocus() {
   const box = $('#focusBody'); if (!box) return;
   const r = foRun();
   let h = APP !== 'main' ? linkCard() : `<button type="button" class="back" data-tab-go="today">‹ Aujourd’hui</button>`;
-  h += `<div class="sp-head"><h1>Focus</h1><p>Lance un bloc, travaille, et le vrai temps passé recale ton planning.</p></div>`;
+  h += r ? `<div class="sp-head"><h1>Focus</h1></div>` : `<div class="sp-head"><h1>Focus</h1><p>Lance un bloc, travaille, et le vrai temps passé recale ton planning.</p></div>`;
   if (r) h += `<div id="foLive"></div>`;
   else {
     const s = foSuggest();
@@ -1300,6 +1319,9 @@ function foPaint() {
   if (!live) return;
   if (!r) { renderFocus(); return; }
   const el = foElapsed(r), ph = foPhase(r), su = subjOf(state, r.subj);
+  const phKey = r.pauseAt ? 'pause' : r.pomo ? (ph.work ? 'w' : 'b') + ph.n : (r.plan && el > r.plan * 6e4 ? 'over' : 'on');
+  if (foLastPhase && phKey !== foLastPhase && phKey !== 'pause' && foLastPhase !== 'pause') beep(2, phKey.startsWith('b') ? 660 : 880);
+  foLastPhase = phKey;
   const target = r.pomo ? (ph.work ? 25 : 5) * 6e4 : (r.plan || 0) * 6e4;
   const inPhase = r.pomo ? (ph.work ? (25 - ph.left) : (5 - ph.left)) * 6e4 : el;
   const pct = target ? Math.min(1, inPhase / target) : 0, over = !r.pomo && r.plan && el > r.plan * 6e4;
@@ -1499,6 +1521,7 @@ function sportSheet(key, id) {
 }
 function sportStart(wi, key, id) {
   const w = SP.workouts[wi];
+  unlockAudio(); keepAwake(true);
   sportRun = { wi, key, id, step: 'warm', wIdx: 0, t: SP.warm[0][2], ex: 0, set: 0, reps: {}, lv: {}, startedAt: Date.now(), light: sportLightWeek() };
   openSheet('Sport · ' + w.name, `<div id="spBox" class="sp-box"></div><div class="sh-actions" id="spAct"></div>`);
   sportPaint(); sportTick();
@@ -1511,9 +1534,9 @@ function sportTick() {
     if (r.step === 'warm' || r.step === 'rest' || (r.step === 'timed' && r.going)) {
       r.t--;
       if (r.t <= 0) {
-        if (r.step === 'warm') { r.wIdx++; if (r.wIdx >= SP.warm.length) { r.step = 'set'; } else r.t = SP.warm[r.wIdx][2]; }
-        else if (r.step === 'rest') r.step = 'set';
-        else if (r.step === 'timed') { r.going = false; sportLog(r.target); return; }
+        if (r.step === 'warm') { r.wIdx++; beep(1, 660); if (r.wIdx >= SP.warm.length) { r.step = 'set'; } else r.t = SP.warm[r.wIdx][2]; }
+        else if (r.step === 'rest') { r.step = 'set'; beep(2); }
+        else if (r.step === 'timed') { r.going = false; beep(2); sportLog(r.target); return; }
         if (navigator.vibrate) navigator.vibrate(200);
       }
       sportPaint();
@@ -1560,7 +1583,7 @@ function sportLog(n) {
   r.step = 'rest'; r.t = e.rest; sportPaint();
 }
 function sportFinish() {
-  clearInterval(sportTimer);
+  clearInterval(sportTimer); keepAwake(false);
   const r = sportRun, w = SP.workouts[r.wi]; sportRun = null;
   beginChange();
   const notes = w.ex.filter(e => r.reps[e.id]).map(e => { const p = r.light ? { note: 'semaine légère : objectif gardé', up: false } : L.sportProgress(state, e.id, r.reps[e.id]); return `<div class="st-row ok"><span class="st-n">${p && p.up ? '↑' : '='}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${r.reps[e.id].join(' · ')}${e.time ? ' s' : ''} → ${esc(p ? p.note : '')}</span></span></div>`; }).join('');
@@ -1574,12 +1597,28 @@ function sportFinish() {
   if (box) box.innerHTML = `<div class="sp-k">Séance terminée</div><div class="sp-n">Bien joué 💪</div><div class="sp-h">Tes objectifs pour la prochaine fois :</div><div class="group">${notes}</div>`;
   if (act) act.innerHTML = `<button type="button" class="btn pri" data-act="closeSheet">Fermer</button>`;
 }
+// a workout left in the middle (sheet closed): a bar to come back to it
+function renderSportBar() {
+  let bar = $('#spBar');
+  if (!sportRun || ($('#spBox') && $('#sheetBg').classList.contains('on'))) { if (bar) bar.remove(); return; }
+  if (!bar) { bar = document.createElement('button'); bar.id = 'spBar'; bar.type = 'button'; bar.dataset.act = 'spResume'; document.body.appendChild(bar); }
+  const w = SP.workouts[sportRun.wi];
+  bar.className = 'fo-bar sp'; bar.innerHTML = `<span class="dot"></span><span class="t">Séance en cours · ${esc(w.name)}</span><span>Reprendre ›</span>`;
+}
+function sportResume() {
+  const r = sportRun; if (!r) return;
+  const w = SP.workouts[r.wi];
+  openSheet('Sport · ' + w.name, `<div id="spBox" class="sp-box"></div><div class="sh-actions" id="spAct"></div><button type="button" class="linkbtn mini" data-act="spQuit" style="margin:10px auto 0;display:block">Arrêter la séance sans l’enregistrer</button>`);
+  keepAwake(true); renderSportBar(); sportPaint(); sportTick();
+}
 function sportAction(a, v, b) {
   const r = sportRun;
   switch (a) {
     case 'sportSheet': sportSheet(b.dataset.w, b.dataset.id); return true;
     case 'sportPick': { const key = b.dataset.w, id = b.dataset.id; sportStart(+v, key, id); return true; }
     case 'sportGo': sportStart(+v, b.dataset.w, b.dataset.id); return true;
+    case 'spResume': sportResume(); return true;
+    case 'spQuit': sportRun = null; clearInterval(sportTimer); keepAwake(false); closeSheet(); renderSportBar(); toast('Séance arrêtée'); return true;
     case 'spSkip': if (r) { r.step = 'set'; sportPaint(); } return true;
     case 'spRest': if (r) { if (+v) r.t += +v; else r.step = 'set'; sportPaint(); } return true;
     case 'spRep': if (r) { r.cur = Math.max(0, (r.cur || 0) + +v); sportPaint(); } return true;
@@ -1977,7 +2016,7 @@ document.addEventListener('pointerdown', e => {
 }, { passive: true });
 
 function openStretchToday() { const n = new Date(), ws = mondayOf(n); const b = document.querySelector('.nav button[data-tab="today"]'); if (b) b.click(); const day = L.generate(state, ws, n)[dow(n)]; const st = day && day.ev.find(e => e.kind === 'stretch'); stretchSheet(dow(n), iso(ws), st ? st.id : ''); }
-if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open === 'stretch') openStretchToday(); if (e.data && e.data.open === 'focus') showTab('focus'); });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open === 'stretch') openStretchToday(); if (e.data && e.data.open === 'focus') showTab('focus'); if (e.data && e.data.open === 'sport') showTab('sport'); });
 /* ---------- boot ---------- */
 renderAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => r.update().catch(() => { })).catch(e => console.warn('sw', e));
@@ -1996,7 +2035,7 @@ if (APP !== 'main') {
 (async () => {
   // opened from a link like …/#lien-<code>: join that device's planning
   if (/^#ouvrir-stretch/.test(location.hash)) { history.replaceState(null, '', location.pathname); setTimeout(openStretchToday, 400); }
-  if (/^#ouvrir-focus/.test(location.hash)) { history.replaceState(null, '', location.pathname); showTab('focus'); }
+  if (/^#ouvrir-(focus|sport)/.test(location.hash)) { const t = location.hash.slice(9); history.replaceState(null, '', location.pathname); showTab(t); }
   const m = /^#lien-([a-f0-9]{32})$/.exec(location.hash);
   if (m) { history.replaceState(null, '', location.pathname); await linkWith(m[1]); }
   else await pull(false);
@@ -2008,6 +2047,7 @@ if (APP !== 'main') {
 })();
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
+  if (foRun() || sportRun) keepAwake(true);
   await pull(false);
   rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000);
   if (tab === 'today') keepScroll(renderToday);

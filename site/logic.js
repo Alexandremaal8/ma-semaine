@@ -997,8 +997,8 @@ function buildNotifications(S, now, horizonDays) {
           push(T(e.start), 'Il est temps de partir', c ? c.title + ' à ' + fmt(c.start) + (c.sub ? ' · ' + c.sub : '') : 'Direction l’EPFL', 'mv' + e.id);
         }
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
-        if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start), 's' + e.id);
-        if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + (e.workout ? ' · ' + e.workout : '') + ' à ' + fmt(e.start), (e.workout ? 'Séance guidée dans l’app. ' : '') + 'Prends ta planche, ça commence dans 10 min.', 'p' + e.id);
+        if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start) + '. Touche pour lancer le chrono.', 'focus-s' + e.id);
+        if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + (e.workout ? ' · ' + e.workout : '') + ' à ' + fmt(e.start), (e.workout ? 'Séance guidée dans l’app. ' : '') + 'Prends ta planche, ça commence dans 10 min.', 'sport-' + e.id);
         if (e.kind === 'routine' && N.routine) push(T(e.start), e.title, fmt(e.start) + '–' + fmt(e.end), 'r' + e.id);
         if (e.kind === 'event' && N.event > 0) push(T(e.start - N.event), e.title + ' à ' + fmt(e.start), (e.sub ? e.sub + ' · ' : '') + 'dans ' + N.event + ' min', 'e' + e.id);
       }
