@@ -508,7 +508,7 @@ function renderToday() {
   const we = addDays(ws, 6);
   $('#tEyebrow').textContent = isToday ? 'Aujourd’hui' : (Math.abs(sel - fromIso(todayIso())) === 864e5 ? (sel > fromIso(todayIso()) ? 'Demain' : 'Hier') : 'Semaine du ' + ws.getDate() + (ws.getMonth() !== we.getMonth() ? ' ' + MONTHS[ws.getMonth()] : '') + ' au ' + dateLbl(we));
   $('#tTitle').textContent = DAYS[dow(sel)] + ' ' + sel.getDate() + ' ' + MONTHS[sel.getMonth()];
-  $('#modePill').innerHTML = `<span class="dot"></span>${MODE_META[wmode].name}${days.meta.cfg.coursesOn ? '' : ' · sans cours'}${days.meta.cfg.source === 'auto' ? '<small class="autotag">auto</small>' : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`;
+  $('#modePill').innerHTML = `<span class="dot"></span><span class="pt">${MODE_META[wmode].name}${days.meta.cfg.coursesOn ? '' : '<small> · sans cours</small>'}</span>${days.meta.cfg.source === 'auto' ? '<small class="autotag">auto</small>' : ''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>`;
   $('#strip').innerHTML = `<button type="button" class="arr" data-act="wk" data-v="-7" aria-label="Semaine précédente">‹</button><div class="days" role="tablist">${days.map(d => {
     const di = iso(d.date);
     return `<button type="button" role="tab" class="sd${di === todayIso() ? ' today' : ''}" aria-selected="${di === selDate}" data-act="pick" data-v="${di}"><span class="l">${DAYS_S[d.d]}</span><span class="n">${d.date.getDate()}</span><span class="p"><i style="width:${d.plan ? d.dn / d.plan * 100 : 0}%"></i></span></button>`;
@@ -901,6 +901,8 @@ function mdBlockLinks(e, wk) {
   const out = [], n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0);
   let estLine = '';
   if (e.serie && !e.corr) { const f0 = mdPick(e.subj, 'serie', n, wk); const es = f0 && f0.est; if (es && es.minutes) estLine = `<div class="su rev">${es.n} exercice${es.n > 1 ? 's' : ''} · ≈ ${hm(Math.max(45, Math.min(360, Math.round(es.minutes * serieRatio(e.subj) / 5) * 5)))} pour toi${es.hard && es.hard.length ? ' · plus dur : exo ' + es.hard.join(', ') : ''}${es.topics && es.topics.length ? '<br>' + esc(es.topics.join(' · ')) : ''}</div>`; }
+  // backlog blocks like "Retard · Série 8": the série and its corrigé are one tap away
+  if (e.bl && !e.serie && !e.corr) { const m = /s[ée]rie\s*(\d{1,2})/i.exec(e.title || ''); if (m) { const sf = mdPick(e.subj, 'serie', +m[1], null), cf = mdPick(e.subj, 'correction', +m[1], null); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Ouvrir la série ${+m[1]}</button>`); if (cf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(cf.file)}">Corrigé</button>`); if (sf || cf) return estLine + `<div class="md-links">${out.join('')}</div>`; } }
   const f = mdFileFor(e, wk); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
   if (e.corr) { const sf = mdPick(e.subj, 'serie', n, wk); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Énoncé</button>`); }
   const study = e.kind === 'study' || e.kind === 'course';
