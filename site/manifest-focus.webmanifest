@@ -1,0 +1,29 @@
+{
+  "name": "EPFL Focus",
+  "short_name": "Focus",
+  "lang": "fr",
+  "start_url": "./focus.html",
+  "scope": "./",
+  "id": "./focus.html",
+  "display": "standalone",
+  "background_color": "#2B1B8F",
+  "theme_color": "#4B3BD6",
+  "icons": [
+    {
+      "src": "icons/focus-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/focus-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/focus-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -71,7 +71,8 @@ jobs:
         run: |
           V="${GITHUB_SHA::7}"
           printf "self.WORKER_URL='%s';self.APP_VERSION='%s';\n" "${{ steps.cf.outputs.url }}" "$V" > site/config.js
-          sed -i "s/__VERSION__/${V}/g" site/sw.js site/index.html
+          node scripts/entries.mjs
+          sed -i "s/__VERSION__/${V}/g" site/sw.js site/index.html site/focus.html site/sport.html
 
       - uses: actions/configure-pages@v5
 

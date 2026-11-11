@@ -16,6 +16,8 @@ try { state = L.normalize(JSON.parse(localStorage.getItem(LS))); } catch (e) { s
 if (!state || !localStorage.getItem(LS)) state = L.defaultState();
 
 let tab = 'today';
+// which home-screen icon opened the app: the full app, or its Focus / Sport space
+const APP = document.documentElement.dataset.app || 'main';
 let selDate = iso(new Date());
 let calMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let calSel = iso(new Date());
@@ -524,8 +526,8 @@ function renderToday() {
     const nxt = main.find(e => e.start > mins && !MINOR.has(e.kind));
     if (cur) {
       const p = Math.round((mins - cur.start) / (cur.end - cur.start) * 100);
-      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}${cur.workout ? ' · ' + esc(cur.workout) : ''}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div><div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</b></span></div>` : ''}</div>`;
-    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}${roomBtn(nxt)}</div></div>`;
+      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}${cur.workout ? ' · ' + esc(cur.workout) : ''}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div>${cur.kind === 'study' && cur.state === 'todo' && !foRun() ? `<button type="button" class="hero-go" data-act="foGo" data-v="${esc(cur.id)}" data-w="${key}">▶ Lancer le focus</button>` : ''}${cur.kind === 'sport' && !(state.done[key] || {})[cur.id] ? `<button type="button" class="hero-go" data-act="sportSheet" data-w="${key}" data-id="${esc(cur.id)}">▶ Commencer la séance</button>` : ''}<div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</b></span></div>` : ''}</div>`;
+    } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}${roomBtn(nxt)}</div>${nxt.kind === 'study' && nxt.state === 'todo' && !foRun() && nxt.start - mins <= 20 ? `<button type="button" class="hero-go" data-act="foGo" data-v="${esc(nxt.id)}" data-w="${key}">▶ Commencer maintenant</button>` : ''}</div>`;
     else hero = `<div class="hero quiet"><div class="k">C’est fini pour aujourd’hui</div><div class="t">Bonne soirée</div><div class="s">Au lit vers ${fmt(day.sleep)}.</div></div>`;
   }
   let late = '';
@@ -575,7 +577,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${(e.kind === 'course' || e.cid) && !e.room && e.cid ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key, sel, day.ev)}${mdBlockLinks(e, key)}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${(e.kind === 'course' || e.cid) && !e.room && e.cid ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key, sel, day.ev)}${mdBlockLinks(e, key)}${foBtn(e, key, sel)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -638,7 +640,7 @@ function ciCandidates() {
   return out.sort((a, b) => a.endT - b.endT).slice(0, 6);
 }
 function checkIn(force) {
-  if (ciOpen || (!force && Date.now() < ciSkipUntil) || $('#sheetBg').classList.contains('on')) return;
+  if (ciOpen || (!force && Date.now() < ciSkipUntil) || $('#sheetBg').classList.contains('on') || (!force && (foRun() || tab === 'focus' || tab === 'sport'))) return;   // never in the middle of a focus or a workout
   ciQueue = ciCandidates(); if (!ciQueue.length) return;
   beginChange(); ciOpen = true; ciShow();
 }
@@ -1206,6 +1208,275 @@ function revRemember(wk, id, part) {
 }
 function revForget(id) { for (const k of Object.keys(state.revDone || {})) delete state.revDone[k][id]; }
 
+/* ---------- Focus : chrono d'étude ----------
+ * You start a block (or a free session), the clock runs from timestamps (so it survives closing the app),
+ * and at the end the real time is what counts: the block is ticked with the minutes you actually spent,
+ * so the planner learns your real pace. */
+let focusTick = null;
+const FO = () => (state.focus = state.focus || { run: null, log: [] });
+const foRun = () => (state.focus || {}).run || null;
+const foElapsed = r => r ? Math.max(0, ((r.pauseAt || Date.now()) - r.start - (r.paused || 0))) : 0;
+const mmss2 = ms => { const t = Math.floor(ms / 1000), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
+function findBlock(wk, id) {
+  if (!wk || !id) return null;
+  const days = L.generate(state, fromIso(wk));
+  for (const x of days) { const e = x.ev.find(z => z.id === id); if (e) return { e, x, days }; }
+  return null;
+}
+// the pomodoro phase at a given elapsed time
+function foPhase(r) {
+  const el = foElapsed(r) / 6e4;
+  if (!r.pomo) return { work: true, n: 0, left: r.plan ? r.plan - el : null };
+  const n = Math.floor(el / 30), inC = el - n * 30;
+  return inC < 25 ? { work: true, n, left: 25 - inC } : { work: false, n, left: 30 - inC };
+}
+function foStart(opt) {
+  const cur = foRun();
+  if (cur) { toast('Un focus tourne déjà : termine-le d’abord'); foOpen(); return; }
+  beginChange();
+  FO().run = { id: opt.id || null, wk: opt.wk || null, subj: opt.subj || null, title: opt.title || 'Focus libre', plan: opt.plan || 0, start: Date.now(), paused: 0, pauseAt: null, pomo: !!opt.pomo, fixed: !!opt.fixed };
+  save(); endChange(); foOpen(); renderFocusBar();
+}
+function foPause() { const r = foRun(); if (!r) return; if (r.pauseAt) { r.paused += Date.now() - r.pauseAt; r.pauseAt = null; } else r.pauseAt = Date.now(); save(); foPaint(); }
+// end: finished → the block is ticked with the real time; not finished → ticked at the share done, the rest gets replanned
+function foStop(finished) {
+  const r = foRun(); if (!r) return;
+  const ms = foElapsed(r), min = Math.max(1, Math.round(ms / 6e4));
+  beginChange();
+  const f = FO(); f.run = null;
+  f.log = (f.log || []).concat([{ at: r.start, end: Date.now(), wk: r.wk, id: r.id, subj: r.subj, title: r.title, ms, plan: r.plan || 0, fin: !!finished }]).slice(-400);
+  if (min >= 3) {
+    const wk = r.wk || iso(mondayOf(new Date(r.start)));
+    const d = state.done[wk] = state.done[wk] || {};
+    const fb = r.id ? findBlock(wk, r.id) : null;
+    if (fb && !d[r.id]) {
+      const ev = fb.e, plan = ev.end - ev.start;
+      revRemember(wk, r.id, finished ? null : Math.min(.95, min / plan)); examRemember(wk, r.id, finished ? null : Math.min(.95, min / plan));
+      d[r.id] = { s: ev.subj, t: ev.title, m: min, d: fb.x.d, a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined, focus: true };
+      if (!finished) d[r.id].p = Math.max(.05, Math.min(.95, min / plan));
+    } else if (!r.id && r.subj) {
+      // free session: it shows in the day and counts for that subject
+      const st = new Date(r.start), sm = st.getHours() * 60 + st.getMinutes();
+      d['f-' + r.start] = { s: r.subj, t: r.title, m: min, d: dow(st), a: Math.floor(sm / 5) * 5, free: true, focus: true };
+    }
+  }
+  save(); renderAll(); endChange(min >= 3 ? 'Focus enregistré' : 'Focus arrêté', min >= 3 ? `${esc(r.title)} · ${hm(min)} de vrai travail${r.plan ? ' (prévu ' + hm(r.plan) + ')' : ''}. Ton planning tient compte du temps réel.` : 'Moins de 3 min : rien d’enregistré.');
+  foPaint(); renderFocusBar();
+}
+function foCancel() { const r = foRun(); if (!r) return; FO().run = null; save(); foPaint(); renderFocusBar(); toast('Focus annulé, rien d’enregistré'); }
+// what to start now: the block in progress, else the next one today
+function foSuggest() {
+  const now = new Date(), wk = iso(mondayOf(now)), days = L.generate(state, mondayOf(now)), x = days[dow(now)], mins = now.getHours() * 60 + now.getMinutes();
+  const todo = x.ev.filter(e => e.kind === 'study' && e.state === 'todo' && e.end > mins - 30).sort((a, b) => a.start - b.start);
+  const missed = x.ev.filter(e => e.kind === 'study' && e.state === 'missed').sort((a, b) => b.start - a.start);
+  return { wk, x, todo, missed, mins };
+}
+function foBlockRow(e, wk, big) {
+  const su = subjOf(state, e.subj);
+  return `<div class="li fo-row${big ? ' big' : ''}" style="--c:${esc((su || {}).color || 'var(--faint)')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(e.title)}</span><span class="su"><span class="num">${fmt(e.start)}–${fmt(e.end)}</span> · ${esc(su ? su.name : '')}${e.state === 'missed' ? ' · raté, à rattraper' : ''}</span></span><button type="button" class="fo-play" data-act="foGo" data-v="${esc(e.id)}" data-w="${wk}" aria-label="Lancer le focus"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></button></div>`;
+}
+function renderFocus() {
+  const box = $('#focusBody'); if (!box) return;
+  const r = foRun();
+  let h = APP !== 'main' ? linkCard() : `<button type="button" class="back" data-tab-go="today">‹ Aujourd’hui</button>`;
+  h += `<div class="sp-head"><h1>Focus</h1><p>Lance un bloc, travaille, et le vrai temps passé recale ton planning.</p></div>`;
+  if (r) h += `<div id="foLive"></div>`;
+  else {
+    const s = foSuggest();
+    const first = s.todo[0];
+    h += first ? `<div class="sec-t">Maintenant</div><div class="group">${foBlockRow(first, s.wk, true)}</div>` : `<div class="group"><div class="empty">Plus de bloc prévu aujourd’hui. Tu peux lancer un focus libre.</div></div>`;
+    const rest = s.todo.slice(1, 6).concat(s.missed.slice(0, 3));
+    if (rest.length) h += `<div class="sec-t">Aujourd’hui</div><div class="group">${rest.map(e => foBlockRow(e, s.wk)).join('')}</div>`;
+    h += `<div class="fo-opts"><label class="fo-pomo"><input type="checkbox" id="foPomo" ${state.focusPomo ? 'checked' : ''}> <span><b>Pomodoro</b> · 25 min de focus, 5 min de pause</span></label></div>
+      <div class="btns"><button type="button" class="btn" data-act="foFree">Focus libre</button></div>`;
+  }
+  h += focusStats();
+  box.innerHTML = h;
+  const pc = $('#foPomo'); if (pc) pc.onchange = () => { state.focusPomo = pc.checked; save(); };
+  foPaint();
+}
+function foPaint() {
+  const live = $('#foLive'), r = foRun();
+  if (!live) return;
+  if (!r) { renderFocus(); return; }
+  const el = foElapsed(r), ph = foPhase(r), su = subjOf(state, r.subj);
+  const target = r.pomo ? (ph.work ? 25 : 5) * 6e4 : (r.plan || 0) * 6e4;
+  const inPhase = r.pomo ? (ph.work ? (25 - ph.left) : (5 - ph.left)) * 6e4 : el;
+  const pct = target ? Math.min(1, inPhase / target) : 0, over = !r.pomo && r.plan && el > r.plan * 6e4;
+  const R = 112, C = 2 * Math.PI * R;
+  let extra = '';
+  if (r.id && r.wk) { const fb = findBlock(r.wk, r.id); if (fb) extra = revLine(fb.e, r.wk, fb.x.date, fb.x.ev) + mdBlockLinks(fb.e, r.wk); }
+  live.innerHTML = `<div class="fo-live${r.pauseAt ? ' paused' : ''}${r.pomo && !ph.work ? ' brk' : ''}" style="--c:${esc((su || {}).color || 'var(--acc)')}">
+    <div class="fo-k">${r.pauseAt ? 'En pause' : r.pomo ? (ph.work ? 'Focus ' + (ph.n + 1) : 'Pause ' + (ph.n + 1) + ' · lève-toi') : over ? 'Temps prévu dépassé' : 'En cours'}</div>
+    <div class="fo-ring"><svg viewBox="0 0 260 260"><circle cx="130" cy="130" r="${R}" class="tr"/><circle cx="130" cy="130" r="${R}" class="pr" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/></svg>
+      <div class="fo-t"><div class="num">${mmss2(el)}</div><small>${r.pomo ? (ph.work ? 'pause dans ' : 'reprise dans ') + Math.ceil(ph.left) + ' min' : r.plan ? 'sur ' + hm(r.plan) + ' prévues' : 'focus libre'}</small></div></div>
+    <div class="fo-n">${esc(r.title)}</div><div class="fo-s">${esc(su ? su.name : '')}</div>
+    <div class="fo-extra">${extra}</div>
+    <div class="fo-btns"><button type="button" class="btn" data-act="foPause">${r.pauseAt ? 'Reprendre' : 'Pause'}</button><button type="button" class="btn pri" data-act="foEnd">Terminer</button></div>
+    <button type="button" class="linkbtn mini" data-act="foCancel" style="margin-top:12px">Annuler sans enregistrer</button></div>`;
+  clearTimeout(focusTick); focusTick = setTimeout(() => { if (tab === 'focus' && document.visibilityState === 'visible') foPaint(); renderFocusBar(); }, 1000 - (Date.now() % 1000));
+}
+function foEndSheet() {
+  const r = foRun(); if (!r) return;
+  const min = Math.round(foElapsed(r) / 6e4);
+  if (!r.id) { foStop(true); return; }
+  openSheet('Fin du focus', `<p style="margin:0 0 14px;color:var(--muted)">${esc(r.title)} · ${hm(Math.max(1, min))} de travail${r.plan ? ' sur ' + hm(r.plan) + ' prévues' : ''}.</p>
+    <div class="btns" style="flex-direction:column;align-items:stretch;padding:0"><button type="button" class="btn pri" data-act="foStop" data-v="1">Bloc fini ✓</button><button type="button" class="btn" data-act="foStop" data-v="0">Pas fini · replanifie le reste</button></div>`);
+}
+function foFreeSheet() {
+  openSheet('Focus libre', `<div class="fields">${F.select('subj', 'Matière', subjOpts(), (state.subjects[0] || {}).id)}${F.text('title', 'Sur quoi ?', '', 'full', 'ex. Fiche résumé, exos en plus…')}${F.select('plan', 'Durée visée', [[0, 'Pas de limite'], [25, '25 min'], [50, '50 min'], [90, '1h30']], 50)}</div><div class="sh-actions"><button type="submit" class="btn pri">Lancer</button></div>`, fd => {
+    const su = subjOf(state, fd.subj);
+    setTimeout(() => foStart({ subj: fd.subj, title: (String(fd.title || '').trim() || 'Focus libre') + (su ? '' : ''), plan: +fd.plan || 0, pomo: !!state.focusPomo }), 350);
+    return true;
+  });
+}
+function foOpen() { if (APP === 'main' || APP === 'focus') showTab('focus'); else showTab('focus'); }
+// the bar above the navigation while a focus runs (every screen, every app)
+function renderFocusBar() {
+  let bar = $('#foBar'); const r = foRun();
+  if (!r) { if (bar) bar.remove(); return; }
+  if (!bar) { bar = document.createElement('button'); bar.id = 'foBar'; bar.type = 'button'; bar.dataset.act = 'foOpen'; document.body.appendChild(bar); }
+  const ph = foPhase(r);
+  bar.className = 'fo-bar' + (r.pauseAt ? ' paused' : '') + (tab === 'focus' ? ' hide' : '');
+  bar.innerHTML = `<span class="dot"></span><span class="t">${esc(r.title)}</span><span class="num">${r.pomo && !ph.work ? 'pause' : mmss2(foElapsed(r))}</span>`;
+  if (tab !== 'focus') { clearTimeout(renderFocusBar.t); renderFocusBar.t = setTimeout(renderFocusBar, 1000); }
+}
+// what the clock says about you
+function focusStats() {
+  const log = ((state.focus || {}).log || []), now = new Date(), ws = mondayOf(now), wk = iso(ws);
+  if (!log.length) return `<div class="sec-t">Tes stats</div><div class="group"><div class="empty">Tes stats apparaîtront après ton premier focus.</div></div>`;
+  const day = t => iso(new Date(t)), min = l => l.reduce((a, x) => a + x.ms, 0) / 6e4;
+  const today = log.filter(x => day(x.at) === todayIso()), week = log.filter(x => x.at >= ws.getTime());
+  const byDay = Array.from({ length: 7 }, (_, i) => min(week.filter(x => day(x.at) === iso(addDays(ws, i)))));
+  const plan = L.generate(state, ws).map(x => x.plan || 0);
+  const mx = Math.max(60, ...byDay, ...plan);
+  const bars = byDay.map((m, i) => `<div class="fo-bc"><div class="fo-bw"><i class="p" style="height:${Math.round(plan[i] / mx * 100)}%"></i><i class="f" style="height:${Math.round(m / mx * 100)}%"></i></div><small>${DAYS_S[i]}</small></div>`).join('');
+  const subj = {}; for (const x of week) if (x.subj) subj[x.subj] = (subj[x.subj] || 0) + x.ms / 6e4;
+  const subjRows = Object.entries(subj).sort((a, b) => b[1] - a[1]).map(([k, m]) => { const su = subjOf(state, k); return `<div class="fo-sr"><span style="--c:${esc((su || {}).color || 'var(--faint)')}"><i style="width:${Math.round(m / Math.max(...Object.values(subj)) * 100)}%"></i></span><b>${esc(su ? su.name : k)}</b><em class="num">${hm(Math.round(m))}</em></div>`; }).join('');
+  // streak: days in a row with at least 45 min of focus
+  let streak = 0; for (let d = new Date(now); ; d = addDays(d, -1)) { const m = min(log.filter(x => day(x.at) === iso(d))); if (m >= 45) streak++; else if (iso(d) !== todayIso()) break; if (streak > 365) break; }
+  // pace: real time vs planned time on finished blocks
+  const fin = log.filter(x => x.fin && x.plan >= 20).slice(-30), ratio = fin.length >= 3 ? fin.reduce((a, x) => a + x.ms / 6e4, 0) / fin.reduce((a, x) => a + x.plan, 0) : null;
+  const pace = ratio == null ? '' : ratio < .9 ? `Tu finis tes blocs en ${Math.round(ratio * 100)} % du temps prévu : l’app te donne moins de temps par bloc là où c’est sûr.` : ratio > 1.1 ? `Tes blocs te prennent ${Math.round(ratio * 100)} % du temps prévu : l’app prévoit plus large pour tes séries.` : 'Tes blocs durent à peu près ce qui est prévu : ton planning est juste.';
+  const avg = Math.round(min(log.slice(-20)) / Math.min(20, log.length));
+  return `<div class="sec-t">Cette semaine</div><div class="group fo-stats">
+    <div class="fo-kpi"><div><b>${hm(Math.round(min(today)))}</b><small>aujourd’hui</small></div><div><b>${hm(Math.round(min(week)))}</b><small>cette semaine</small></div><div><b>${streak} j</b><small>série de jours</small></div><div><b>${hm(avg)}</b><small>par session</small></div></div>
+    <div class="fo-bars">${bars}</div><div class="fo-leg"><span><i class="f"></i>focus réel</span><span><i class="p"></i>prévu</span></div>
+    ${subjRows ? `<div class="fo-subj">${subjRows}</div>` : ''}
+    ${pace ? `<p class="fo-pace">${pace}</p>` : ''}</div>`;
+}
+function focusAction(a, v, b) {
+  switch (a) {
+    case 'foOpen': foOpen(); return true;
+    case 'foGo': {
+      const fb = findBlock(b.dataset.w, v); if (!fb) { toast('Bloc introuvable'); return true; }
+      const e = fb.e; foStart({ id: e.id, wk: b.dataset.w, subj: e.subj, title: e.title, plan: e.end - e.start, pomo: !!state.focusPomo, fixed: !!e.fixed });
+      return true;
+    }
+    case 'foPause': foPause(); return true;
+    case 'foEnd': foEndSheet(); return true;
+    case 'foStop': closeSheet(); setTimeout(() => foStop(v === '1'), 250); return true;
+    case 'foCancel': foCancel(); return true;
+    case 'foFree': foFreeSheet(); return true;
+  }
+  return false;
+}
+
+/* ---------- Espace Sport : prochaine séance, progrès, historique ---------- */
+const spLog = () => state.sportLog || [];
+// every 6th week of training is lighter (one set less, no new targets): muscles grow when they recover
+function sportLightWeek(at) {
+  const wk = iso(mondayOf(at ? new Date(at) : new Date()));
+  if (state.sportLight && state.sportLight[wk] != null) return !!state.sportLight[wk];
+  const weeks = [...new Set(spLog().map(x => iso(mondayOf(new Date(x.at)))))].filter(w => w < wk);
+  return weeks.length >= 5 && weeks.length % 5 === 0;
+}
+function sportNextBlock() {
+  const now = new Date();
+  for (const ws of [mondayOf(now), addDays(mondayOf(now), 7)]) {
+    const wk = iso(ws), days = L.generate(state, ws), dm = state.done[wk] || {};
+    for (const x of days) for (const e of x.ev) if (e.kind === 'sport' && !dm[e.id] && x.date.getTime() + e.end * 6e4 > now.getTime()) return { e, x, wk };
+  }
+  return null;
+}
+function exHistory(id) {
+  return spLog().filter(s => s.reps && s.reps[id]).map(s => ({ at: s.at, reps: s.reps[id], lv: s.lv ? s.lv[id] : null }));
+}
+function spark(vals, h = 34, w = 120) {
+  if (vals.length < 2) return '';
+  const mx = Math.max(...vals), mn = Math.min(...vals), r = mx - mn || 1;
+  const pts = vals.map((v, i) => `${Math.round(i / (vals.length - 1) * w)},${Math.round(h - 4 - (v - mn) / r * (h - 8))}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}"/></svg>`;
+}
+function renderSport() {
+  const box = $('#sportBody'); if (!box) return;
+  const nb = sportNextBlock(), light = sportLightWeek(), log = spLog();
+  let h = APP !== 'main' ? linkCard() : `<button type="button" class="back" data-tab-go="today">‹ Aujourd’hui</button>`;
+  h += `<div class="sp-head"><h1>Sport</h1><p>Planche à pompes + câbles · 3 séances qui tournent, objectifs qui montent tout seuls.</p></div>`;
+  if (light) h += `<div class="prop"><b>Semaine légère</b><p>Une série de moins par exercice, mêmes objectifs : c’est la semaine où tes muscles récupèrent et se renforcent. Ça revient à la normale la semaine prochaine.</p></div>`;
+  if (nb) {
+    const w = SP.workouts[nb.e.wi != null ? nb.e.wi : (state.sportNext || 0) % SP.workouts.length];
+    const today = iso(nb.x.date) === todayIso();
+    h += `<div class="sp-next"><div class="k">${today ? 'Aujourd’hui' : DAYS[nb.x.d] + ' ' + dateLbl(nb.x.date)} · ${fmt(nb.e.start)}</div><div class="t">${esc(w.name)}</div><div class="s">${esc(w.focus)} · ~45 min</div>
+      <div class="sp-exl">${w.ex.map(e => `<span>${esc(e.name.split(' · ')[0])}</span>`).join('')}</div>
+      <button type="button" class="btn pri" data-act="sportSheet" data-w="${nb.wk}" data-id="${esc(nb.e.id)}">${today ? 'Voir la séance' : 'Voir la séance'}</button></div>`;
+  }
+  h += `<div class="btns"><button type="button" class="btn" data-act="spFree">Séance hors planning</button></div>`;
+  // the week
+  const ws = mondayOf(new Date()), wk = iso(ws), days = L.generate(state, ws), dm = state.done[wk] || {};
+  const sess = days.flatMap(x => x.ev.filter(e => e.kind === 'sport').map(e => ({ e, x })));
+  const doneN = sess.filter(z => dm[z.e.id]).length;
+  let streak = 0; for (let w0 = addDays(ws, -7); ; w0 = addDays(w0, -7)) { const n = log.filter(x => x.at >= w0.getTime() && x.at < addDays(w0, 7).getTime()).length; if (n >= 2) streak++; else break; if (streak > 100) break; }
+  h += `<div class="sec-t">Cette semaine</div><div class="group fo-stats"><div class="fo-kpi"><div><b>${doneN}/${sess.length}</b><small>séances</small></div><div><b>${log.length}</b><small>séances en tout</small></div><div><b>${streak}</b><small>semaines d’affilée</small></div></div>
+    <div class="sp-week">${sess.map(z => `<span class="${dm[z.e.id] ? 'ok' : ''}"><b>${DAYS_S[z.x.d]}</b>${esc(z.e.workout || '')}</span>`).join('')}</div></div>`;
+  // progress per exercise
+  h += `<div class="sec-t">Tes progrès</div>`;
+  const openW = nb && nb.e.wi != null ? nb.e.wi : (state.sportNext || 0) % SP.workouts.length;
+  for (const [wi, w] of SP.workouts.entries()) {
+    h += `<details class="group sp-prog-g"${wi === openW ? ' open' : ''}><summary class="sp-wh">${esc(w.id)} · ${esc(w.name)}<span>${w.ex.length} exercices</span></summary>${w.ex.map(e => {
+      const lv = L.sportLevel(state, e.id), hist = exHistory(e.id);
+      const best = hist.length ? Math.max(...hist.flatMap(x => x.reps)) : null;
+      const vals = hist.map(x => x.reps.reduce((a, r) => a + r, 0) / x.reps.length + (x.lv != null ? x.lv * 20 : 0));
+      return `<div class="sp-ex"><div class="bd"><div class="ti">${esc(e.name)}</div><div class="su">${esc(e.levels[lv.lvl][0])} · objectif ${lv.target}${e.time ? ' s' : ''}${best != null ? ' · record ' + best + (e.time ? ' s' : '') : ''}</div><div class="sp-lvl">${e.levels.map((_, i) => `<i class="${i < lv.lvl ? 'ok' : i === lv.lvl ? 'on' : ''}"></i>`).join('')}</div></div>${spark(vals.slice(-12))}</div>`;
+    }).join('')}</details>`;
+  }
+  // history
+  h += `<div class="sec-t">Historique</div><div class="group">${log.slice(-12).reverse().map(s => { const w = SP.workouts.find(x => x.id === s.w); let reps = 0, secs = 0; for (const [id, arr] of Object.entries(s.reps || {})) { const ex = (w ? w.ex : []).find(z => z.id === id); const t = arr.reduce((a, r) => a + r, 0); if (ex && ex.time) secs += t; else reps += t; } const d = new Date(s.at); return `<div class="li"><span class="bd"><span class="ti">${esc(w ? w.name : s.w)}${s.light ? ' · légère' : ''}</span><span class="su">${DAYS[dow(d)]} ${dateLbl(d)}${s.min ? ' · ' + hm(s.min) : ''} · ${reps} reps${secs ? ' · ' + secs + ' s de gainage/cardio' : ''}</span></span></div>`; }).join('') || '<div class="empty">Ta première séance apparaîtra ici.</div>'}</div>`;
+  box.innerHTML = h;
+}
+function spFreeSheet() {
+  openSheet('Séance hors planning', `<p class="hint" style="margin:-4px 0 12px;padding:0">Elle compte dans tes progrès. La rotation continue après celle que tu choisis.</p><div class="btns" style="flex-direction:column;align-items:stretch;padding:0">${SP.workouts.map((w, i) => `<button type="button" class="btn${i === (state.sportNext || 0) % SP.workouts.length ? ' pri' : ''}" data-act="sportGo" data-v="${i}" data-w="${iso(mondayOf(new Date()))}" data-id="">${esc(w.name)}</button>`).join('')}</div>`);
+}
+
+/* ---------- the Focus and Sport icons share your data through your link ---------- */
+function foBtn(e, key, sel) {
+  if (e.kind !== 'study' || !(e.state === 'todo' || e.state === 'missed') || iso(sel) !== todayIso()) return '';
+  const r = foRun();
+  if (r && r.id === e.id) return `<div class="md-links"><button type="button" class="linkbtn mini fo on" data-act="foOpen">● Focus en cours · ${mmss2(foElapsed(r))}</button></div>`;
+  return `<div class="md-links"><button type="button" class="linkbtn mini fo" data-act="foGo" data-v="${esc(e.id)}" data-w="${key}">▶ Focus</button></div>`;
+}
+function linkCard() {
+  if (syncKey()) return '';
+  return `<div class="prop link-card"><b>Relie cette icône à ton app</b><p>Sur iPhone, chaque icône a sa propre mémoire. Dans l’app principale : Réglages → Mes appareils → Copier le lien, puis colle-le ici.</p>
+    <div class="fields" style="margin:8px 0 0">${F.text('lk', 'Ton lien', '', 'full', 'https://…#lien-…')}</div>
+    <div class="btns" style="padding:8px 0 0"><button type="button" class="btn" data-act="lkPaste">Coller</button><button type="button" class="btn pri" data-act="lkGo">Relier</button></div></div>`;
+}
+async function lkGo(txt) {
+  const m = /lien-([a-f0-9]{32})/.exec(txt || '') || /^\s*([a-f0-9]{32})\s*$/.exec((txt || '').replace(/\s/g, ''));
+  if (!m) { toast('Colle le lien complet (il finit par #lien-…)'); return; }
+  await linkWith(m[1]); renderAll(); if (tab === 'focus') renderFocus(); if (tab === 'sport') renderSport();
+}
+const iconUrl = (page, k) => location.href.split('#')[0].replace(/[^/]*$/, '') + page + (k ? '#lien-' + k : '');
+async function iconsSheet() {
+  if (!syncKey()) { await ensureKey(); }
+  const k = syncKey();
+  openSheet('Icônes Focus et Sport', `<p style="margin:0 0 12px;color:var(--muted)">Deux icônes de plus sur ton écran d’accueil : elles ouvrent directement le chrono ou le sport, avec ton planning à jour.</p>
+    <div class="ic-row"><img src="icons/focus-192.png" alt=""><div><b>Focus</b><small>Chrono d’étude et stats</small></div><button type="button" class="btn" data-act="icCopy" data-v="focus.html">Copier le lien</button></div>
+    <div class="ic-row"><img src="icons/sport-192.png" alt=""><div><b>Sport</b><small>Séances, progrès, historique</small></div><button type="button" class="btn" data-act="icCopy" data-v="sport.html">Copier le lien</button></div>
+    <ol class="steps" style="margin-top:14px"><li>Copie un lien, colle-le dans <b>Safari</b> et ouvre-le</li><li>Partager → <b>Sur l’écran d’accueil</b></li><li>Ouvre la nouvelle icône : si elle te le demande, colle le même lien (il est encore copié)</li></ol>
+    <p class="hint">Garde ces liens pour toi : ils donnent accès à ton planning. ${k ? '' : 'Active d’abord la synchro dans Mes appareils.'}</p>`);
+}
+
 /* ---------- Sport : séances guidées avec la planche à pompes + câbles ---------- */
 let sportTimer = null, sportRun = null;
 const SP = L.SPORT;
@@ -1216,7 +1487,8 @@ function sportPlanFor(key, days) {
   return out;
 }
 function sportWorkoutOf(key, id) { const ws = fromIso(key); const p = sportPlanFor(key, L.generate(state, ws, new Date())); return p[id] != null && p[id] >= 0 ? p[id] : (state.sportNext || 0) % SP.workouts.length; }
-const exLine = e => { const lv = L.sportLevel(state, e.id); return `${e.sets} × ${lv.target}${e.time ? ' s' : ''}${e.side ? ' (par côté)' : ''} · ${e.levels[lv.lvl][0]}`; };
+const setsOf = (e, light) => light ? Math.max(2, e.sets - 1) : e.sets;
+const exLine = e => { const lv = L.sportLevel(state, e.id); return `${setsOf(e, sportLightWeek())} × ${lv.target}${e.time ? ' s' : ''}${e.side ? ' (par côté)' : ''} · ${e.levels[lv.lvl][0]}`; };
 function sportSheet(key, id) {
   const wi = sportWorkoutOf(key, id), w = SP.workouts[wi];
   const others = SP.workouts.map((x, i) => i === wi ? '' : `<button type="button" class="btn" data-act="sportPick" data-v="${i}" data-w="${key}" data-id="${esc(id)}">${esc(x.name)}</button>`).join('');
@@ -1227,7 +1499,7 @@ function sportSheet(key, id) {
 }
 function sportStart(wi, key, id) {
   const w = SP.workouts[wi];
-  sportRun = { wi, key, id, step: 'warm', wIdx: 0, t: SP.warm[0][2], ex: 0, set: 0, reps: {}, startedAt: Date.now() };
+  sportRun = { wi, key, id, step: 'warm', wIdx: 0, t: SP.warm[0][2], ex: 0, set: 0, reps: {}, lv: {}, startedAt: Date.now(), light: sportLightWeek() };
   openSheet('Sport · ' + w.name, `<div id="spBox" class="sp-box"></div><div class="sh-actions" id="spAct"></div>`);
   sportPaint(); sportTick();
 }
@@ -1260,10 +1532,11 @@ function sportPaint() {
     return;
   }
   const lv = L.sportLevel(state, e.id), lvl = e.levels[lv.lvl];
-  const head = `${prog}<div class="sp-k">${r.ex + 1}/${w.ex.length} · série ${r.set + 1}/${e.sets}</div><div class="sp-n">${esc(e.name)}</div><div class="sp-lv"><b>${esc(lvl[0])}</b> · ${esc(lvl[1])}</div>`;
+  r.lv[e.id] = lv.lvl;
+  const head = `${prog}<div class="sp-k">${r.ex + 1}/${w.ex.length} · série ${r.set + 1}/${setsOf(e, r.light)}${r.light ? ' · semaine légère' : ''}</div><div class="sp-n">${esc(e.name)}</div><div class="sp-lv"><b>${esc(lvl[0])}</b> · ${esc(lvl[1])}</div>`;
   if (r.step === 'rest') {
-    const nx = r.set < e.sets ? e : w.ex[r.ex];
-    box.innerHTML = `${prog}<div class="sp-k">Repos</div><div class="sp-big num">${mmss(r.t)}</div><div class="sp-h">Ensuite : ${esc(nx.name)}, série ${r.set + 1}/${nx.sets}</div>`;
+    const nx = w.ex[r.ex];
+    box.innerHTML = `${prog}<div class="sp-k">Repos</div><div class="sp-big num">${mmss(r.t)}</div><div class="sp-h">Ensuite : ${esc(nx.name)}, série ${r.set + 1}/${setsOf(nx, r.light)}</div>`;
     act.innerHTML = `<button type="button" class="btn" data-act="spRest" data-v="15">+15 s</button><button type="button" class="btn pri" data-act="spRest" data-v="0">Je suis prêt</button>`;
     return;
   }
@@ -1282,7 +1555,7 @@ function sportLog(n) {
   const r = sportRun, w = SP.workouts[r.wi], e = w.ex[r.ex];
   (r.reps[e.id] = r.reps[e.id] || []).push(n);
   r.cur = null; r.step = 'set'; r.set++;
-  if (r.set >= e.sets) { r.ex++; r.set = 0; }
+  if (r.set >= setsOf(e, r.light)) { r.ex++; r.set = 0; }
   if (r.ex >= w.ex.length) { sportFinish(); return; }
   r.step = 'rest'; r.t = e.rest; sportPaint();
 }
@@ -1290,11 +1563,12 @@ function sportFinish() {
   clearInterval(sportTimer);
   const r = sportRun, w = SP.workouts[r.wi]; sportRun = null;
   beginChange();
-  const notes = w.ex.filter(e => r.reps[e.id]).map(e => { const p = L.sportProgress(state, e.id, r.reps[e.id]); return `<div class="st-row ok"><span class="st-n">${p && p.up ? '↑' : '='}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${r.reps[e.id].join(' · ')}${e.time ? ' s' : ''} → ${esc(p ? p.note : '')}</span></span></div>`; }).join('');
+  const notes = w.ex.filter(e => r.reps[e.id]).map(e => { const p = r.light ? { note: 'semaine légère : objectif gardé', up: false } : L.sportProgress(state, e.id, r.reps[e.id]); return `<div class="st-row ok"><span class="st-n">${p && p.up ? '↑' : '='}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${r.reps[e.id].join(' · ')}${e.time ? ' s' : ''} → ${esc(p ? p.note : '')}</span></span></div>`; }).join('');
   const dm = state.done[r.key] = state.done[r.key] || {};
-  if (r.id) dm[r.id] = { k: 'sport', m: Math.max(20, Math.round((Date.now() - r.startedAt) / 6e4)), w: w.id };
+  const took = Math.max(1, Math.round((Date.now() - r.startedAt) / 6e4));
+  if (r.id) dm[r.id] = { k: 'sport', m: Math.max(20, took), w: w.id };
   state.sportNext = (r.wi + 1) % SP.workouts.length;
-  state.sportLog = (state.sportLog || []).concat([{ at: Date.now(), w: w.id, reps: r.reps }]).slice(-40);
+  state.sportLog = (state.sportLog || []).concat([{ at: r.startedAt, w: w.id, reps: r.reps, lv: r.lv, min: took, light: r.light || undefined }]).slice(-150);
   save(); renderAll(); endChange();
   const box = $('#spBox'), act = $('#spAct');
   if (box) box.innerHTML = `<div class="sp-k">Séance terminée</div><div class="sp-n">Bien joué 💪</div><div class="sp-h">Tes objectifs pour la prochaine fois :</div><div class="group">${notes}</div>`;
@@ -1396,7 +1670,11 @@ function renderWeek() {
   const byDay = DAYS.map((_, i) => state.courses.filter(c => c.day === i).sort((a, b) => a.start - b.start));
   const courseRows = byDay.map((list, i) => list.length ? `<div class="dayhead">${DAYS[i]}</div>` + list.map(c => { const s = subjOf(state, c.subj); return `<button type="button" class="li" data-act="editCourse" data-v="${c.id}" style="--c:${esc(s ? s.color : '')}"><span class="dt"></span><span class="bd"><span class="ti">${esc(s ? s.name : 'Cours')}</span><span class="su">${esc([c.type, c.room].filter(Boolean).join(' · '))}</span></span><span class="rt">${fmt(c.start)}<br>${fmt(c.end)}</span>${CHEV}</button>`; }).join('') : '').join('');
   const prioL = ['', 'Importance faible', 'Importance normale', 'Importance haute'];
+  const foWeek = Math.round(((state.focus || {}).log || []).filter(x => x.at >= mondayOf(new Date()).getTime()).reduce((t, x) => t + x.ms, 0) / 6e4);
+  const nbS = sportNextBlock();
   $('#weekBody').innerHTML = `
+    <div class="spaces"><button type="button" class="space fo" data-tab-go="focus"><img src="icons/focus-192.png" alt=""><b>Focus</b><small>${foRun() ? 'en cours · ' + mmss2(foElapsed(foRun())) : foWeek ? hm(foWeek) + ' cette semaine' : 'chrono d’étude'}</small></button>
+      <button type="button" class="space sp" data-tab-go="sport"><img src="icons/sport-192.png" alt=""><b>Sport</b><small>${nbS ? 'prochaine : ' + esc(nbS.e.workout || '') : 'progrès, historique'}</small></button></div>
     ${(() => {
       const today = todayIso(), up = [];
       (state.trips || []).filter(t => t.to >= today).forEach(t => up.push([t.from, `<button type="button" class="li" data-act="editTrip" data-v="${esc(t.id)}" style="--c:#0F766E"><span class="dt"></span><span class="bd"><span class="ti">${esc(t.title)}</span><span class="su">Voyage · du ${dateLbl(fromIso(t.from))} au ${dateLbl(fromIso(t.to))}</span></span>${CHEV}</button>`]));
@@ -1452,6 +1730,8 @@ function renderSet() {
       <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>`; })()}
     <div class="sec-t">Moodle</div>
     <div class="group">${moodleSet()}</div>
+    <div class="sec-t">Icônes Focus et Sport</div>
+    <div class="group"><button type="button" class="li" data-act="icons"><span class="bd"><span class="ti">Ajouter les icônes à l’écran d’accueil</span><span class="su">Chrono d’étude et sport, comme deux apps à part, avec tes données</span></span>${CHEV}</button></div>
     <div class="sec-t">Mes appareils</div>
     <div class="group">${syncKey()
       ? `<div class="status"><b>Synchro activée</b>Tes données sont les mêmes sur tous les appareils reliés. Sur un autre appareil, ouvre le lien de connexion.</div>
@@ -1532,12 +1812,12 @@ function widgetSheet() {
     <p class="hint" style="margin-top:10px">Le widget affiche ce que tu fais maintenant et la suite. Il se met à jour quand tu ouvres l’app.</p>`);
 }
 
-function renderAll() { renderToday(); if (tab === 'cal') renderCal(); renderWeek(); renderSet(); renderBacklog(); }
+function renderAll() { renderToday(); if (tab === 'cal') renderCal(); renderWeek(); renderSet(); renderBacklog(); if (tab === 'focus') renderFocus(); if (tab === 'sport') renderSport(); renderFocusBar(); }
 function showTab(t) {
   tab = t;
   document.querySelectorAll('.nav button').forEach(b => { if (b.dataset.tab === t) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + t));
-  if (t === 'cal') renderCal(); if (t === 'today') renderToday(); if (t === 'set') renderSet(); if (t === 'week') renderWeek(); if (t === 'bl') renderBacklog();
+  if (t === 'cal') renderCal(); if (t === 'today') renderToday(); if (t === 'set') renderSet(); if (t === 'week') renderWeek(); if (t === 'bl') renderBacklog(); if (t === 'focus') renderFocus(); if (t === 'sport') renderSport(); renderFocusBar();
   window.scrollTo(0, 0);
 }
 const keepScroll = fn => { const y = window.scrollY; fn(); window.scrollTo(0, y); };
@@ -1554,7 +1834,13 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b || b.type === 'submit') return;
   const a = b.dataset.act, v = b.dataset.v;
   if (MUTATING.has(a)) beginChange();
+  if (/^fo[A-Z]/.test(a) && focusAction(a, v, b)) return;
   if (/^(sport|sp)[A-Z]/.test(a) && sportAction(a, v, b)) return;
+  if (a === 'spFree') { spFreeSheet(); return; }
+  if (a === 'lkPaste') { try { const t = await navigator.clipboard.readText(); const f = $('#f-lk'); if (f) f.value = t; } catch (err) { toast('Colle-le à la main dans le champ'); } return; }
+  if (a === 'lkGo') { lkGo(($('#f-lk') || {}).value); return; }
+  if (a === 'icons') { iconsSheet(); return; }
+  if (a === 'icCopy') { copyText(iconUrl(v, syncKey()), 'Lien copié : colle-le dans Safari'); return; }
   if (/^m[ad][A-Z]/.test(a) && mdAction(a, v, b)) return;
   switch (a) {
     case 'roomAdd': roomSheet(v); return;
@@ -1691,13 +1977,26 @@ document.addEventListener('pointerdown', e => {
 }, { passive: true });
 
 function openStretchToday() { const n = new Date(), ws = mondayOf(n); const b = document.querySelector('.nav button[data-tab="today"]'); if (b) b.click(); const day = L.generate(state, ws, n)[dow(n)]; const st = day && day.ev.find(e => e.kind === 'stretch'); stretchSheet(dow(n), iso(ws), st ? st.id : ''); }
-if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open === 'stretch') openStretchToday(); });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => { if (e.data && e.data.open === 'stretch') openStretchToday(); if (e.data && e.data.open === 'focus') showTab('focus'); });
 /* ---------- boot ---------- */
 renderAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').then(r => r.update().catch(() => { })).catch(e => console.warn('sw', e));
+// the Focus and Sport icons: their own navigation, opening on their space
+if (APP !== 'main') {
+  const nav = document.querySelector('.nav .in') || document.querySelector('.nav');
+  const ico = APP === 'focus' ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M10 3h4"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 17h18M6 17l1.5-6M10 17L8.5 11M14 17l1.5-6M18 17l-1.5-6M6.5 11h3M14.5 11h3"/></svg>';
+  const btns = [...nav.querySelectorAll('button')];
+  const keep = btns.filter(x => ['today', 'cal'].includes(x.dataset.tab));
+  btns.forEach(x => { if (!keep.includes(x)) x.remove(); });
+  const first = document.createElement('button'); first.type = 'button'; first.dataset.tab = APP; first.innerHTML = ico + (APP === 'focus' ? 'Focus' : 'Sport');
+  nav.insertBefore(first, keep[0] || null);
+  document.title = APP === 'focus' ? 'EPFL Focus' : 'EPFL Sport';
+  showTab(APP);
+}
 (async () => {
   // opened from a link like …/#lien-<code>: join that device's planning
   if (/^#ouvrir-stretch/.test(location.hash)) { history.replaceState(null, '', location.pathname); setTimeout(openStretchToday, 400); }
+  if (/^#ouvrir-focus/.test(location.hash)) { history.replaceState(null, '', location.pathname); showTab('focus'); }
   const m = /^#lien-([a-f0-9]{32})$/.exec(location.hash);
   if (m) { history.replaceState(null, '', location.pathname); await linkWith(m[1]); }
   else await pull(false);

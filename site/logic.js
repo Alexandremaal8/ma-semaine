@@ -1020,6 +1020,16 @@ function buildNotifications(S, now, horizonDays) {
     if (!su.exam) continue; const ex = fromIso(su.exam);
     for (const k of [7, 1]) { const t = addDays(ex, -k); t.setHours(19, 30, 0, 0); push(t.getTime(), 'Examen ' + su.name + (k === 1 ? ' demain' : ' dans une semaine'), k === 1 ? 'Relis tes fiches, prépare tes affaires et dors tôt.' : 'Passe en mode Exam si c’est pas déjà fait.', 'x' + su.id + k); }
   }
+  // a focus session running: tell when the planned time is up, or each pomodoro phase
+  const F = S.focus && S.focus.run;
+  if (F && !F.pauseAt && F.start) {
+    const t0 = F.start + (F.paused || 0), what = F.title || 'Focus';
+    if (F.pomo) for (let n = 0; n < 8; n++) {
+      push(t0 + (n * 30 + 25) * 6e4, 'Pause · 5 min', what + ' : ' + (n + 1) * 25 + ' min de focus. Lève-toi, bois de l’eau.', 'focus');
+      push(t0 + (n + 1) * 30 * 6e4, 'On reprend', what + ' : focus ' + (n + 2) + ', 25 min.', 'focus');
+    }
+    else if (F.plan) push(t0 + F.plan * 6e4, 'Temps prévu écoulé', what + ' · ' + F.plan + ' min. Termine le bloc dans l’app, ou continue si tu es lancé.', 'focus');
+  }
   out.sort((a, b) => a.at - b.at);
   return out.slice(0, 400);
 }

@@ -1,6 +1,6 @@
 /* Ma semaine EPFL — service worker: offline cache + notifications */
 const CACHE = 'ma-semaine-__VERSION__';
-const SHELL = ['./', './index.html', './app.js', './logic.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/apple-touch-icon.png'];
+const SHELL = ['./', './index.html', './focus.html', './sport.html', './app.js', './logic.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/apple-touch-icon.png', './icons/focus-192.png', './icons/sport-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -30,9 +30,9 @@ self.addEventListener('push', e => {
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const stretch = /^stretch/.test(e.notification.tag || '');
+  const tag = e.notification.tag || '', open = /^stretch/.test(tag) ? 'stretch' : /^focus/.test(tag) ? 'focus' : '';
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
-    for (const c of cs) if ('focus' in c) { if (stretch) c.postMessage({ open: 'stretch' }); return c.focus(); }
-    return self.clients.openWindow(stretch ? './#ouvrir-stretch' : './');
+    for (const c of cs) if ('focus' in c) { if (open) c.postMessage({ open }); return c.focus(); }
+    return self.clients.openWindow(open ? './#ouvrir-' + open : './');
   }));
 });

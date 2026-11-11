@@ -1,0 +1,29 @@
+{
+  "name": "EPFL Sport",
+  "short_name": "Sport",
+  "lang": "fr",
+  "start_url": "./sport.html",
+  "scope": "./",
+  "id": "./sport.html",
+  "display": "standalone",
+  "background_color": "#0B6E62",
+  "theme_color": "#0F9E74",
+  "icons": [
+    {
+      "src": "icons/sport-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/sport-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/sport-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
