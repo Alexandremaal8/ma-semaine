@@ -32,7 +32,7 @@ jobs:
           node test/logic.test.js | tail -1 | grep -q OK
           node test/fuzz.test.js | tail -1 | grep -q OK
           node test/moodle.test.mjs | grep -q "moodle study OK"
-          node test/weekly.test.mjs | grep -q "exams OK"
+          node test/weekly.test.mjs | grep -q "exo OK"
 
       - name: Préparer Cloudflare (compte, sous-domaine, stockage)
         id: cf

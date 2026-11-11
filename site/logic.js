@@ -323,7 +323,10 @@ function layoutDay(S, m, weekStart, d) {
   const busy = () => ev.filter(e => e.end > e.start);
   const free = (s, e) => busy().every(b => b.end <= s || b.start >= e);
   ev.push({ kind: 'stretch', start: wake, end: wake + 5, title: 'Stretching · 5 min', sub: STRETCH[d].name });
-  courses.forEach(c => { const su = subjOf(S, c.subj); ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id, room: c.room || '' }); });
+  courses.forEach(c => { const su = subjOf(S, c.subj);
+    // exercise sessions are when the série gets done: a série block (checkable, counted in the série's time)
+    if (c.type === 'Exercices' && su && su.serie) { ev.push({ kind: 'fixed', exo: true, start: c.start, end: c.end, title: 'Séance d’exercices', subj: c.subj, fsub: [su.name, c.room].filter(Boolean).join(' · '), cid: c.id, room: c.room || '' }); return; }
+    ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id, room: c.room || '' }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
   S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
   dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
@@ -489,6 +492,7 @@ function generate(S0, weekStart, now) {
   const carry = carryOver(S, weekStart);
   // must = séries + checking them against the correction, plus anything unfinished from last week
   const must = {}, corr = {}, corrFrom = {}, corrPrev = {}; let mustTotal = 0;
+  const exoMin = {}; for (const x of days) for (const e of x.ev) if (e.exo) exoMin[e.subj] = (exoMin[e.subj] || 0) + e.end - e.start;
   const prevWs = addDays(weekStart, -7), prevCfg = { coursesOn: coursesOnFor(S0, prevWs) };
   for (const su of S.subjects) {
     // this week's correction only if it comes out before Sunday night; otherwise it moves to next week,
@@ -500,7 +504,8 @@ function generate(S0, weekStart, now) {
     const av = corrAvail(S0, weekStart, su);
     corrFrom[su.id] = fromPrev && !(S.coursesOn && su.serie && !deferred) ? null : (av && !deferred ? av : null);
     const sDone = !!((S.serieDone || {})[key] || {})[su.id];
-    const v = (S.coursesOn && !sDone ? serieMinOf(S, key, su) : 0) + c + (carry[su.id] || 0);
+    const v0 = (S.coursesOn && !sDone ? serieMinOf(S, key, su) : 0) + c + (carry[su.id] || 0);
+    const v = Math.max(c + (carry[su.id] || 0), v0 - (exoMin[su.id] || 0));
     corr[su.id] = c;
     if (v > 0) { must[su.id] = v; mustTotal += v; }
   }
@@ -720,7 +725,8 @@ function generate(S0, weekStart, now) {
   const mustLeft = {}, carryLeft = {}, revLeft = {}, corrLeft = {};
   const serieMin = {}; for (const v of Object.values(doneMap)) if (v && typeof v === 'object' && v.serie && !v.c && !v.b && v.s) serieMin[v.s] = (serieMin[v.s] || 0) + (v.m || 0);
   for (const su of S.subjects) {
-    const dn = (doneBy[su.id] || 0) - (((S.serieDone || {})[key] || {})[su.id] ? (serieMin[su.id] || 0) : 0);
+    const exoDone = Object.values(doneMap).filter(v => v && typeof v === 'object' && v.fx && v.serie && v.s === su.id).reduce((a, v) => a + (v.m || 0), 0);
+    const dn = (doneBy[su.id] || 0) - exoDone - (((S.serieDone || {})[key] || {})[su.id] ? Math.max(0, (serieMin[su.id] || 0) - exoDone) : 0);
     const mu = must[su.id] || 0;
     mustLeft[su.id] = Math.max(0, mu - dn);
     corrLeft[su.id] = Math.min(corr[su.id] || 0, mustLeft[su.id]);
@@ -732,6 +738,8 @@ function generate(S0, weekStart, now) {
   let lateMin = 0;
   for (const x of days) for (const e of x.ev) {
     if (e.kind !== 'fixed') continue;
+    // série already finished: the exercise session is just a class again
+    if (e.exo && ((S.serieDone || {})[key] || {})[e.subj]) { const su0 = subjOf(S, e.subj); Object.assign(e, { kind: 'course', title: su0 ? su0.name : 'Cours', sub: ['Exercices', e.room].filter(Boolean).join(' · '), ctype: 'Exercices', exo: false }); continue; }
     const id = idOf(x.d, e), rec = doneMap[id], len = e.end - e.start;
     const startT = x.date.getTime() + e.start * 6e4, endT = x.date.getTime() + e.end * 6e4;
     e.kind = 'study'; e.id = id; e.fixed = true; e.len = len;
@@ -739,6 +747,13 @@ function generate(S0, weekStart, now) {
     if (rec && typeof rec === 'object') e.state = 'done';
     else if (endT <= nowT) { e.state = endT <= sinceT ? 'pre' : 'missed'; }
     else e.state = 'todo';
+    if (e.exo) {
+      e.serie = true; e.title = (wkN ? 'Série ' + wkN : 'Série') + ' · séance d’exercices';
+      // a session missed: its part of the série goes back to the blocks ahead; a partial one counts for what was done
+      if (e.state === 'missed' && !((S.serieDone || {})[key] || {})[e.subj]) mustLeft[e.subj] = (mustLeft[e.subj] || 0) + len;
+      if (e.state === 'done' && rec.p != null && rec.p < 1) mustLeft[e.subj] = (mustLeft[e.subj] || 0) + Math.round(len * (1 - rec.p));
+      continue;
+    }
     revLeft[e.subj] = Math.max(0, (revLeft[e.subj] || 0) - len);
   }
   for (const f of frozen) {
@@ -792,8 +807,9 @@ function generate(S0, weekStart, now) {
     }
     return out;
   };
+  let extendByLast = [];
   function extendBy(need, fromDay) {
-    const added = [];
+    const added = []; extendByLast = added;
     for (const pass of ['ext', 'day']) for (const x of days) {
       if (need < 15) return added;
       if (x.d < (fromDay || 0)) continue;
@@ -814,7 +830,20 @@ function generate(S0, weekStart, now) {
   if (mustNeed > futureCap && S.mode !== 'recup') future.push(...extendBy(mustNeed - futureCap));
   future.sort((a, b) => a.startT - b.startT);
   const blLive = blOpen.length && blCap ? mkBl() : null;
-  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft, blLive, mkPrep());
+  const prepLive = mkPrep();
+  assignInto(future, mustLeft, carryLeft, revLeft, corrLeft, blLive, prepLive);
+  // a weekly task (MOOC…) that no longer fits before its day gets extra time before that day
+  if (prepLive && S.mode !== 'recup') for (const t of Object.values(prepLive)) {
+    if (!t.task || t.dayCap || t.left < 15 || t.date.getTime() <= nowT) continue;
+    const before = Math.round((t.date - weekStart) / 864e5);
+    const more = extendBy(t.left, 0).filter(f => f.d < before).sort((a, b) => a.startT - b.startT);
+    for (const f of extendByLast) if (!more.includes(f)) { const i = live.indexOf(f); if (i >= 0) { live.splice(i, 1); extended -= f.len; } }
+    for (const f of more) {
+      if (t.left < 15) { const i = live.indexOf(f); if (i >= 0) { live.splice(i, 1); extended -= f.len; } continue; }
+      const len = Math.min(f.len, t.left); f.end = f.start + len; f.endT = f.startT + len * 6e4; f.len = len;
+      f.title = t.title; f.subj = t.subj; f.task = true; f.catchup = false; t.left -= len;
+    }
+  }
   const leftNow = () => Object.values(mustLeft).reduce((a, b) => a + (b >= 25 ? b : 0), 0);
   for (let k = 0; k < 2 && leftNow() >= 25 && S.mode !== 'recup'; k++) {
     // if only corrections are left, extra time only helps on/after the day they come out

@@ -62,7 +62,7 @@ console.log('sport OK');
   const ws4 = L.mondayOf(new Date(2026, 10, 9)), k4 = L.iso(ws4);
   const before = L.generate(S4, ws4, ws4).meta.mustTotal;
   S4.serieEst = { [k4]: { ana: 90 } };
-  assert.equal(L.generate(S4, ws4, ws4).meta.mustTotal, before - 90);   // analyse: 3h → 1h30
+  assert.ok(L.generate(S4, ws4, ws4).meta.mustTotal < before);   // analyse: 3h → 1h30 (minus the exercise session)
   assert.equal(S4.semEnd, '2026-12-18');
   assert.equal(L.coursesOnFor(S4, L.mondayOf(new Date(2026, 11, 14))), true);
   assert.equal(L.coursesOnFor(S4, L.mondayOf(new Date(2027, 0, 4))), false);
@@ -75,3 +75,24 @@ console.log('sport OK');
   assert.ok(!g.some(x => x.ev.some(e => /^Série/.test(e.title))), 'no séries after the semester');
 }
 console.log('exams OK');
+{
+  // exercise sessions are série blocks
+  const S5 = L.normalize(L.defaultState()); S5.since = new Date(2026, 10, 1).getTime();
+  const ws5 = L.mondayOf(new Date(2026, 10, 9)), k5 = L.iso(ws5);
+  const out = (g, subj) => g.flatMap(x => x.ev.filter(e => e.kind === 'study' && e.subj === subj && e.serie && !e.corr && !e.fixed)).reduce((a, e) => a + e.end - e.start, 0);
+  let g = L.generate(S5, ws5, ws5);
+  const exo = g.flatMap(x => x.ev.filter(e => e.subj === 'ana' && /séance d’exercices/.test(e.title)).map(e => ({ d: x.d, e })));
+  assert.ok(exo.length && exo.every(z => z.e.kind === 'study' && z.e.serie && z.e.fixed && /^Série \d+ · séance d’exercices$/.test(z.e.title)), 'exercise session = série block');
+  const exoLen = exo.reduce((a, z) => a + z.e.end - z.e.start, 0), su = S5.subjects.find(x => x.id === 'ana');
+  assert.ok(Math.abs(out(g, 'ana') - (su.serie - exoLen)) <= 20, 'série time outside the session = série − session (' + out(g, 'ana') + ')');
+  // session missed → its time comes back in the blocks ahead
+  const z = exo[0], after = new Date(z.e.end * 6e4 + L.addDays(ws5, z.d).getTime() + 60e3);
+  const g2 = L.generate(S5, ws5, after);
+  const futureAna = g2.flatMap(x => x.ev.filter(e => e.kind === 'study' && e.subj === 'ana' && e.serie && !e.corr && e.state === 'todo')).reduce((a, e) => a + e.end - e.start, 0);
+  assert.ok(futureAna >= exoLen - 20, 'missed session replanned (' + futureAna + ')');
+  // série ticked "finie": the session is a plain class again
+  S5.serieDone = { [k5]: { ana: true } };
+  g = L.generate(S5, ws5, ws5);
+  assert.ok(g.some(x => x.ev.some(e => e.kind === 'course' && e.subj === 'ana' && /Exercices/.test(e.sub))));
+}
+console.log('exo OK');
