@@ -174,3 +174,17 @@ console.log('focus OK');
   assert.ok(!after.some(e => e !== me && e.state !== 'done' && e.start < me.end && e.end > me.start), 'nothing overlaps the real block');
   console.log('chrono truth OK');
 }
+{
+  // January: only subjects with an exam still ahead get revision time; one notification per study block
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 1).getTime();
+  const ex = { ana: '2027-01-11', phy: '2027-01-15', alg: '2027-01-18', aicc: '2027-01-22' };
+  for (const su of S.subjects) if (ex[su.id]) su.exam = ex[su.id];
+  const g = L.generate(S, L.mondayOf(new Date(2027, 0, 18)), new Date(2027, 0, 17, 20));
+  const by = {}; for (const x of g) for (const e of x.ev) if (e.kind === 'study') by[e.subj] = (by[e.subj] || 0) + e.end - e.start;
+  assert.ok(!by.prog && !by.ana && !by.phy, 'no time for prog (no exam) nor passed exams: ' + JSON.stringify(by));
+  assert.ok(by.aicc > 600, 'the last exam gets the week');
+  S.notif.on = true;
+  const n = L.buildNotifications(S, new Date(2026, 10, 21, 6), 1), tags = n.map(x => x.tag);
+  assert.equal(new Set(tags).size, tags.length, 'one notification per block');
+  console.log('january OK');
+}

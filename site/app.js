@@ -57,13 +57,13 @@ function mergeStates(remote, local) {
     for (const [wk, m] of Object.entries(local[k])) R[k][wk] = m && typeof m === 'object' && !Array.isArray(m) ? Object.assign({}, R[k][wk] || {}, m) : m;
   }
   const lf = local.focus || {}, rf = R.focus = R.focus || {};
-  rf.log = byKey(rf.log, lf.log, x => x.at + ':' + (x.id || '')).sort((a, b) => a.at - b.at).slice(-400);
+  rf.log = byKey(rf.log, lf.log, x => x.at + ':' + (x.id || '')).sort((a, b) => a.at - b.at).slice(-300);
   const ended = st => rf.log.some(x => x.at === st);
   const runs = [rf.run, lf.run].filter(r => r && !ended(r.start)).sort((a, b) => b.start - a.start);
   rf.run = runs[0] || null;
   const lastAt = st => Math.max(0, ...(st.sportLog || []).map(x => x.at));
   const localSport = lastAt(local) > lastAt(R);
-  R.sportLog = byKey(R.sportLog, local.sportLog, x => x.at).sort((a, b) => a.at - b.at).slice(-150);
+  R.sportLog = byKey(R.sportLog, local.sportLog, x => x.at).sort((a, b) => a.at - b.at).slice(-90);
   if (localSport) { R.sportProg = local.sportProg; R.sportNext = local.sportNext; }
   return R;
 }
@@ -101,6 +101,10 @@ const linkUrl = k => location.origin + location.pathname + '#lien-' + k;
 function save() {
   const keys = Object.keys(state.done).sort();
   while (keys.length > 12) delete state.done[keys.shift()];
+  // keep the state light (instant sync when you leave an icon works up to ~60 KB): old focus sessions lose their labels
+  const old = Date.now() - 21 * 864e5, fo = state.focus && state.focus.log;
+  if (fo) { for (const x of fo) if (x.at < old && x.title) { delete x.title; delete x.wk; } if (fo.length > 300) state.focus.log = fo.slice(-300); }
+  if (state.sportLog && state.sportLog.length > 90) state.sportLog = state.sportLog.slice(-90);
   try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) { }
   lsSet(UPD_LS, String(Date.now()));
   clearTimeout(syncTimer); syncTimer = setTimeout(syncAll, 2500);
@@ -567,7 +571,7 @@ function renderToday() {
     const nxt = main.find(e => e.start > mins && !MINOR.has(e.kind));
     if (cur) {
       const p = Math.round((mins - cur.start) / (cur.end - cur.start) * 100);
-      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}${cur.workout ? ' · ' + esc(cur.workout) : ''}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div>${cur.kind === 'study' && cur.state === 'todo' && !foRun() ? `<button type="button" class="hero-go" data-act="foGo" data-v="${esc(cur.id)}" data-w="${key}">▶ Lancer le focus</button>` : ''}${cur.kind === 'sport' && !(state.done[key] || {})[cur.id] ? `<button type="button" class="hero-go" data-act="sportSheet" data-w="${key}" data-id="${esc(cur.id)}">▶ Commencer la séance</button>` : ''}<div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</b></span></div>` : ''}</div>`;
+      hero = `<div class="hero"><div class="k">Maintenant · encore ${hm(cur.end - mins)}</div><div class="t">${esc(cur.title)}${cur.workout ? ' · ' + esc(cur.workout) : ''}</div><div class="s">${esc(cur.sub || '')}${roomBtn(cur)}</div>${cur.kind === 'study' && cur.state === 'todo' && !foRun() ? `<button type="button" class="hero-go" data-act="foGo" data-v="${esc(cur.id)}" data-w="${key}">▶ Lancer le focus</button>${!cur.fixed && state.chronoTruth !== false ? `<div class="hero-warn">Sans chrono, compté pas fait à ${fmt(cur.end)}</div>` : ''}` : ''}${cur.kind === 'sport' && !(state.done[key] || {})[cur.id] ? `<button type="button" class="hero-go" data-act="sportSheet" data-w="${key}" data-id="${esc(cur.id)}">▶ Commencer la séance</button>` : ''}<div class="bar"><i style="width:${p}%"></i></div>${nxt ? `<div class="next"><span class="num">${fmt(nxt.start)}</span><span>Ensuite <b>${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</b></span></div>` : ''}</div>`;
     } else if (nxt) hero = `<div class="hero"><div class="k">Prochain · dans ${hm(nxt.start - mins)}</div><div class="t">${esc(nxt.title)}${nxt.workout ? ' · ' + esc(nxt.workout) : ''}</div><div class="s"><span class="num">${fmt(nxt.start)}–${fmt(nxt.end)}</span>${nxt.sub ? ' · ' + esc(nxt.sub) : ''}${roomBtn(nxt)}</div>${nxt.kind === 'study' && nxt.state === 'todo' && !foRun() && nxt.start - mins <= 20 ? `<button type="button" class="hero-go" data-act="foGo" data-v="${esc(nxt.id)}" data-w="${key}">▶ Commencer maintenant</button>` : ''}</div>`;
     else hero = `<div class="hero quiet"><div class="k">C’est fini pour aujourd’hui</div><div class="t">Bonne soirée</div><div class="s">Au lit vers ${fmt(day.sleep)}.</div></div>`;
   }
@@ -1321,7 +1325,7 @@ function foStart(opt) {
 // minute of the day the chrono started, if it started that day (late start, overtime: the block shows its real times)
 function realStart(r, dayDate) {
   const st = new Date(r.start); if (iso(st) !== iso(dayDate)) return null;
-  return Math.floor((st.getHours() * 60 + st.getMinutes()) / 5) * 5;
+  return st.getHours() * 60 + st.getMinutes();
 }
 function foSwapSlot(fb, wk) {
   const e = fb.e, now = new Date();
@@ -1340,7 +1344,7 @@ function foStop(finished, after) {
   const ms = foElapsed(r), min = Math.max(1, Math.round(ms / 6e4));
   beginChange();
   const f = FO(); f.run = null; keepAwake(false);
-  f.log = (f.log || []).concat([{ at: r.start, end: Date.now(), wk: r.wk, id: r.id, subj: r.subj, title: r.title, ms, plan: r.plan || 0, fin: !!finished }]).slice(-400);
+  f.log = (f.log || []).concat([{ at: r.start, end: Date.now(), wk: r.wk, id: r.id, subj: r.subj, title: r.title, ms, plan: r.plan || 0, fin: !!finished }]).slice(-300);
   if (min < 3 && r.swap && r.wk) { const d = state.done[r.wk] || {}; if (d[r.swap.id] && d[r.swap.id].live) delete d[r.swap.id]; }
   if (min >= 3) {
     const wk = r.wk || iso(mondayOf(new Date(r.start)));
@@ -1776,7 +1780,7 @@ function sportFinish() {
   const took = Math.max(1, Math.round((Date.now() - r.startedAt) / 6e4));
   if (r.id) dm[r.id] = { k: 'sport', m: Math.max(20, took), w: w.id };
   state.sportNext = (r.wi + 1) % SP.workouts.length;
-  state.sportLog = (state.sportLog || []).concat([{ at: r.startedAt, w: w.id, reps: r.reps, lv: r.lv, min: took, light: r.light || undefined }]).slice(-150);
+  state.sportLog = (state.sportLog || []).concat([{ at: r.startedAt, w: w.id, reps: r.reps, lv: r.lv, min: took, light: r.light || undefined }]).slice(-90);
   save(); syncSoon(); renderAll(); endChange();
   const box = $('#spBox'), act = $('#spAct');
   if (box) box.innerHTML = `<div class="sp-k">Séance terminée</div><div class="sp-n">Bien joué 💪</div><div class="sp-h">Tes objectifs pour la prochaine fois :</div><div class="group">${notes}</div>`;

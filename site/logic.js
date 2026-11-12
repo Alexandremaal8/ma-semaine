@@ -410,10 +410,14 @@ function layoutDay(S, m, weekStart, d) {
 /* ---------- requirements for the week ---------- */
 function examWeight(S, su, date) {
   let b = 1;
-  if (su.exam) {
+  // exams still ahead (any subject): once the semester is over, only they get revision time
+  const ahead = S.subjects.some(x => x.exam && fromIso(x.exam) >= date);
+  if (su.exam && fromIso(su.exam) >= addDays(date, -3)) {
     const dd = (fromIso(su.exam) - date) / 864e5;
     if (dd < 0) b = .05; else if (dd <= 3) b = 4; else if (dd <= 7) b = 2.6; else if (dd <= 14) b = 1.7; else if (dd <= 28) b = 1.2;
-  } else if (S.mode === 'exam') b = .35;
+  } else if (su.exam && ahead) b = 0;                       // exam passed: nothing more to revise
+  else if (ahead && !inSemester(S, mondayOf(date))) b = 0;  // no exam this session, semester over
+  else if (S.mode === 'exam') b = .35;
   for (const mk of S.mocks || []) {
     if (mk.subj !== su.id || !mk.date) continue;
     const dd = (fromIso(mk.date) - date) / 864e5;
@@ -1063,8 +1067,8 @@ function buildNotifications(S, now, horizonDays) {
           push(T(e.start), 'Il est temps de partir', c ? c.title + ' à ' + fmt(c.start) + (c.sub ? ' · ' + c.sub : '') : 'Direction l’EPFL', 'mv' + e.id);
         }
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
-        if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start) + '. Touche pour lancer le chrono.', 'focus-s' + e.id);
-        if (e.kind === 'study' && N.study && !e.fixed && S.chronoTruth !== false && e.end - e.start > 30 && !(S.focus && S.focus.run)) push(T(e.start + CHRONO_GRACE), 'Chrono pas lancé · ' + e.title, 'Lance-le quand tu commences. Sans chrono, ce bloc compte comme pas fait à ' + fmt(e.end) + '.', 'focus-s' + e.id);
+        // one notification per block (a second "not started" one doubled them: 20 a day on weekends)
+        if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start) + '. Touche pour lancer le chrono' + (!e.fixed && S.chronoTruth !== false ? ' (sans chrono, compté pas fait à ' + fmt(e.end) + ').' : '.'), 'focus-s' + e.id);
         if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + (e.workout ? ' · ' + e.workout : '') + ' à ' + fmt(e.start), (e.workout ? 'Séance guidée dans l’app. ' : '') + 'Prends ta planche, ça commence dans 10 min.', 'sport-' + e.id);
         if (e.kind === 'routine' && N.routine) push(T(e.start), e.title, fmt(e.start) + '–' + fmt(e.end), 'r' + e.id);
         if (e.kind === 'event' && N.event > 0) push(T(e.start - N.event), e.title + ' à ' + fmt(e.start), (e.sub ? e.sub + ' · ' : '') + 'dans ' + N.event + ' min', 'e' + e.id);
