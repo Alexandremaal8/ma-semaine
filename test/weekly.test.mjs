@@ -151,3 +151,20 @@ console.log('focus OK');
   assert.ok(!all.some(e => e.levels.some(l => /pause/i.test(l[0]))), 'no "pause" variant that reads like a rest');
   console.log('sport v2 OK');
 }
+{
+  // the chrono is the proof: not started 15 min after the start → not done, its work moves on
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 9));
+  const g0 = L.generate(S, ws, new Date(2026, 10, 14, 9, 0));
+  const b = g0[5].ev.find(e => e.kind === 'study' && !e.fixed && e.start >= 600);
+  const at = m => new Date(2026, 10, 14, Math.floor(m / 60), m % 60);
+  const st = (S2, m) => L.generate(S2, ws, at(m))[5].ev.find(e => e.id === b.id);
+  assert.equal(st(S, b.start + 10).state, 'todo', 'still time to start it');
+  const late = st(S, b.start + 16);
+  assert.ok(late.state === 'missed' && late.noChrono, 'no chrono after 15 min → not done');
+  S.focus = { run: { id: b.id, start: at(b.start + 2).getTime() } };
+  assert.equal(st(S, b.start + 16).state, 'todo', 'a chrono running keeps it');
+  S.focus = {}; S.chronoTruth = false;
+  assert.equal(st(S, b.start + 16).state, 'todo', 'can be turned off');
+  console.log('chrono truth OK');
+}

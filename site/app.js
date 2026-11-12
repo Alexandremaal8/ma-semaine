@@ -673,7 +673,7 @@ function ciCandidates() {
     const ws = addDays(mondayOf(new Date()), k), wk = iso(ws), asked = (state.asked || {})[wk] || {};
     if (ws.getTime() + 7 * 864e5 < (state.since || 0)) continue;
     for (const x of L.generate(state, ws)) for (const e of x.ev) {
-      if (e.kind !== 'study' || e.state !== 'missed' || asked[e.id]) continue;
+      if (e.kind !== 'study' || e.state !== 'missed' || asked[e.id] || (state.chronoTruth !== false && !e.fixed)) continue;
       const endT = x.date.getTime() + e.end * 6e4;
       if (nowT - endT > 36 * 3600e3) continue;
       out.push({ wk, id: e.id, e, date: x.date, endT });
@@ -1597,7 +1597,11 @@ function foBtn(e, key, sel) {
   if (e.kind !== 'study' || !(e.state === 'todo' || e.state === 'missed') || iso(sel) !== todayIso()) return '';
   const r = foRun();
   if (r && r.id === e.id) return `<div class="md-links"><button type="button" class="linkbtn mini fo on" data-act="foOpen">● Focus en cours · ${mmss2(foElapsed(r))}</button></div>`;
-  return `<div class="md-links"><button type="button" class="linkbtn mini fo" data-act="foGo" data-v="${esc(e.id)}" data-w="${key}">▶ Focus</button></div>`;
+  // block under way without its chrono: how long before it counts as not done
+  const n = new Date(), nm = n.getHours() * 60 + n.getMinutes(), left = e.start + L.CHRONO_GRACE - nm;
+  const warn = state.chronoTruth !== false && !e.fixed && e.state === 'todo' && !r && nm >= e.start && left > 0 ? ` <span class="fo-warn">sinon compté pas fait dans ${left} min</span>` : '';
+  const miss = e.noChrono ? ` <span class="fo-warn">pas lancé · replacé plus tard</span>` : '';
+  return `<div class="md-links"><button type="button" class="linkbtn mini fo" data-act="foGo" data-v="${esc(e.id)}" data-w="${key}">▶ Focus</button>${warn}${miss}</div>`;
 }
 function linkCard() {
   if (syncKey()) return '';
@@ -1940,6 +1944,7 @@ function renderSet() {
     <div class="sec-t">Mode</div>
     ${(() => { const c = cfgOf(iso(mondayOf(new Date()))); return `<div class="group">
       <label class="row-sw"><span class="bd"><span class="ti">Choix automatique du mode</span><span class="su">Avance avant un voyage, Exam avant les examens, Rattrapage si le retard ne rentre plus</span></span><input type="checkbox" class="sw" data-auto="1" ${state.autoMode !== false ? 'checked' : ''}></label>
+      <label class="row-sw"><span class="bd"><span class="ti">Le chrono fait foi</span><span class="su">Un bloc sans chrono lancé ${L.CHRONO_GRACE} min après son début compte comme pas fait et part plus tard. Plus de question « T’as fini ce bloc ? ».</span></span><input type="checkbox" class="sw" data-chrono="1" ${state.chronoTruth !== false ? 'checked' : ''}></label>
       <button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">Cette semaine : ${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">${c.source === 'manual' ? 'Choisi par toi' : c.source === 'auto' ? 'Automatique · ' + esc(c.why) : 'Mode habituel'}</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="baseModeSheet"><span class="bd"><span class="ti">Mode habituel : ${MODE_META[state.mode].name}</span><span class="su">Pour les semaines sans rien de spécial</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>`; })()}
@@ -2170,6 +2175,7 @@ document.addEventListener('change', e => {
     if (t.value === 'manual') L.backlogOpen(state).forEach((x, k) => { const it = state.backlog.find(e => e.id === x.id); if (it) it.rank = k; });
     state.blOrder = t.value; done(); return;
   }
+  if (t.dataset.chrono) { beginChange(); state.chronoTruth = t.checked; done(); return; }
   if (t.dataset.auto) { beginChange(); state.autoMode = t.checked; if (!t.checked) state.autoModes = {}; done(); return; }
   if (t.dataset.courses) {
     const wk = t.dataset.courses; state.noCourseWeeks = state.noCourseWeeks.filter(x => x !== wk);

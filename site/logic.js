@@ -814,16 +814,20 @@ function generate(S0, weekStart, now) {
       else if (f.subj) revLeft[f.subj] = Math.max(0, (revLeft[f.subj] || 0) - f.len);
     }
   }
+  // the chrono is the proof: a block not started CHRONO_GRACE min after its start counts as not done
+  // (its work moves to the blocks ahead right away), unless a focus is running
+  const running = S.focus && S.focus.run;
+  const noChrono = s => S.chronoTruth !== false && !running && s.startT + CHRONO_GRACE * 6e4 <= nowT;
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
     const b = base[i];
     // a block done keeps the length it had when ticked (a slot can have been cut for a weekly task since)
     const recLen = rec && typeof rec === 'object' && rec.m ? Math.round(rec.p ? rec.m / rec.p : rec.m) : 0;
     if (rec && typeof rec === 'object') live.push(Object.assign({}, s, recLen && recLen < s.len ? { end: s.start + recLen, endT: s.startT + recLen * 6e4, len: recLen } : {}, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
-    else if (s.endT <= nowT) {
+    else if (s.endT <= nowT || noChrono(s)) {
       const pre = s.endT <= sinceT;
       if (!pre) lateMin += s.len;
-      live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed' }));
+      live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed', noChrono: s.endT > nowT || undefined }));
     } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
   });
   // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were
@@ -936,7 +940,7 @@ function generate(S0, weekStart, now) {
     if (s.state === 'todo' && x.date.getTime() + s.end * 6e4 <= nowT) s.state = x.date.getTime() + s.end * 6e4 <= sinceT ? 'pre' : 'missed';
     if (s.kind2 === 'ahead') { x.ev.push({ kind: 'free', start: s.start, end: s.end, title: 'Libre', sub: 'T’es en avance', id: s.id }); continue; }
     const su = s.subj ? subjOf(S, s.subj) : null;
-    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part });
+    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part, noChrono: s.noChrono });
   }
   // a marker after the last série block of each subject: the série should be finished by then
   if (S.coursesOn) for (const su of S.subjects) {
@@ -1045,6 +1049,7 @@ function buildNotifications(S, now, horizonDays) {
         }
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
         if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start) + '. Touche pour lancer le chrono.', 'focus-s' + e.id);
+        if (e.kind === 'study' && N.study && !e.fixed && S.chronoTruth !== false && e.end - e.start > CHRONO_GRACE && !(S.focus && S.focus.run)) push(T(e.start + CHRONO_GRACE - 5), 'Chrono pas lancé · ' + e.title, 'Lance-le dans les 5 min, sinon ce bloc compte comme pas fait et part plus tard.', 'focus-s' + e.id);
         if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + (e.workout ? ' · ' + e.workout : '') + ' à ' + fmt(e.start), (e.workout ? 'Séance guidée dans l’app. ' : '') + 'Prends ta planche, ça commence dans 10 min.', 'sport-' + e.id);
         if (e.kind === 'routine' && N.routine) push(T(e.start), e.title, fmt(e.start) + '–' + fmt(e.end), 'r' + e.id);
         if (e.kind === 'event' && N.event > 0) push(T(e.start - N.event), e.title + ' à ' + fmt(e.start), (e.sub ? e.sub + ' · ' : '') + 'dans ' + N.event + ' min', 'e' + e.id);
@@ -1184,6 +1189,7 @@ function parseAnnounce(title, text, ref) {
 /* ---------- sport: 3 rotating workouts for a push-up board + its resistance cables ----------
  * Double progression: each exercise has a rep (or seconds) range and harder variants.
  * Hit the target on every set → +1 rep next time; past the top of the range → next variant, back to the bottom. */
+const CHRONO_GRACE = 15;
 const X = (id, name, sets, min, max, rest, levels, o = {}) => ({ id, name, sets, min, max, rest, levels, time: !!o.time, side: !!o.side, start: o.start || 0, step: o.time ? 5 : 1, pose: o.pose || '', q: o.q || name, cue: o.cue || '', gear: o.gear || 'corps' });
 const PUSHUP_LV = zone => [
   ['Sur les genoux', 'Genoux au sol, mains sur les poignées ' + zone + ', corps droit des genoux à la tête. Descends jusqu’à frôler la planche.'],
@@ -1250,6 +1256,6 @@ function sportProgress(S, id, done) {
   return { lvl, target, note, up: lvl > cur.lvl || target > cur.target };
 }
 
-const API = { serieReport, serieSpent, inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { CHRONO_GRACE, serieReport, serieSpent, inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);
