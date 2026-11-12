@@ -131,3 +131,15 @@ console.log('focus OK');
   assert.ok(cd.length && Math.min(...cd) >= 5, 'correction after Friday: ' + cd);
   console.log('serie progress OK');
 }
+{
+  // a timed exam: a campus morning, calm before it, nothing planned on top
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 1).getTime();
+  Object.assign(S.subjects.find(s => s.id === 'ana'), { exam: '2027-01-11', examStart: 555, examEnd: 750, examRoom: 'INM 200' });
+  const day = L.generate(S, L.mondayOf(new Date(2027, 0, 11)), new Date(2027, 0, 4))[0];
+  const ex = day.ev.find(e => e.exam);
+  assert.ok(ex && ex.start === 555 && ex.end === 750 && /INM 200/.test(ex.sub), 'exam on the day with its room');
+  assert.ok(day.ev.some(e => e.kind === 'move' && e.end <= 555), 'commute to the exam');
+  assert.ok(!day.ev.some(e => e.kind === 'study' && e.start < 555), 'no study before the exam');
+  assert.ok(!day.ev.some(e => e !== ex && e.end > e.start && e.start < ex.end && e.end > ex.start), 'nothing on top of the exam');
+  console.log('exam day OK');
+}

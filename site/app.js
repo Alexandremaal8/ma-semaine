@@ -305,15 +305,27 @@ function toggleOff(di) {
   else state.offDays.push(di);
   done();
 }
+// IS-Academia, session d'hiver 2027 (end times read off the calendar view: about 12:30, adjustable)
+const WINTER = [
+  { subj: 'ana', date: '2027-01-11', s: 555, e: 750, room: 'INM 200, INM 202…' },
+  { subj: 'phy', date: '2027-01-15', s: 555, e: 750, room: 'CE 1 515, CE 1 1…' },
+  { subj: 'alg', date: '2027-01-18', s: 555, e: 750, room: 'BS 260, CE 1 1…' },
+  { subj: 'aicc', date: '2027-01-22', s: 555, e: 735, room: '' }
+];
 function editExam(subjId, date) {
   const opts = subjOpts();
   openSheet('Date d’examen', `<div class="fields">
     ${F.select('subj', 'Matière', opts, subjId || (opts[0] || [])[0])}
     ${F.date('exam', 'Date', date || (subjOf(state, subjId) || {}).exam || calSel)}
-  </div><p class="hint" style="margin-top:10px">La matière prend plus de place dans ton planning les deux semaines d’avant. Rappels une semaine avant et la veille.</p>${actions(!!subjId)}`, (fd, btn) => {
+    <div class="f"><label for="f-es">Début</label><input id="f-es" name="es" type="time" value="${(subjOf(state, subjId) || {}).examStart != null ? fmt(subjOf(state, subjId).examStart) : ''}"></div><div class="f"><label for="f-ee">Fin</label><input id="f-ee" name="ee" type="time" value="${(subjOf(state, subjId) || {}).examEnd != null ? fmt(subjOf(state, subjId).examEnd) : ''}"></div>
+    ${F.text('room', 'Salle', (subjOf(state, subjId) || {}).examRoom || '', 'full', 'ex. CE 1 515')}
+  </div><p class="hint" style="margin-top:10px">Les révisions démarrent 6 semaines avant, en 3 passes. Avec l’heure, l’app te réveille et te fait partir à temps ce jour-là, et laisse ta matinée calme.</p>${actions(!!subjId)}`, (fd, btn) => {
     const s = subjOf(state, fd.subj); if (!s) return false;
     if (isDel(btn)) { s.exam = ''; return done(); }
-    s.exam = fd.exam || ''; if (s.exam) calSel = s.exam; return done();
+    s.exam = fd.exam || ''; if (s.exam) calSel = s.exam;
+    const es = fd.es ? parseT(fd.es) : null, ee = fd.ee ? parseT(fd.ee) : null;
+    if (es != null && ee > es) { s.examStart = es; s.examEnd = ee; } else { delete s.examStart; delete s.examEnd; }
+    s.examRoom = (fd.room || '').trim().slice(0, 60); return done();
   });
 }
 function addSheet() {
@@ -689,14 +701,17 @@ function proposal(ws, key, M, wmode) {
     return `<div class="prop"><b>La série de ${esc(su.name)} te prend plutôt ${hm(avg)}.</b><p>Les 2 dernières semaines : ${log.map(x => hm(x.m)).join(' et ')}, pour ${hm(su.serie)} prévues. J’ajuste le planning ?</p>
       <div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="serieAdjust" data-v="${esc(su.id)}" data-m="${avg}">Passer à ${hm(avg)}</button><button type="button" class="btn" data-act="dismiss" data-v="${id}">Garder ${hm(su.serie)}</button></div></div>`;
   }
-  // 3. things found on Moodle (time-sensitive), then the exam-dates nudge
+  // 3. the winter session from IS-Academia, in one tap
+  const win = WINTER.filter(x => { const su = subjOf(state, x.subj); return su && (su.exam !== x.date || su.examStart !== x.s); });
+  const winter = !(win.length && todayIso() < '2027-01-11' && !(state.dismiss || {})['winter27']) ? '' : `<div class="prop"><b>Ta session d’hiver</b><p style="margin-bottom:6px">${WINTER.map(x => `${esc(subjOf(state, x.subj).name)} · ${DAYS[dow(fromIso(x.date))].toLowerCase()} ${fromIso(x.date).getDate()} janvier, ${fmt(x.s)}${x.room ? ' · ' + esc(x.room) : ''}`).join('<br>')}</p><p>La prog n’a pas d’examen : c’est le mini-projet 2. Je les ajoute ? Les révisions démarrent 6 semaines avant chaque examen, en 3 passes, Liban compris.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="winterExams">Tout ajouter</button><button type="button" class="btn" data-act="dismiss" data-v="winter27">Plus tard</button></div></div>`;
+  // 4. things found on Moodle (time-sensitive), then the exam-dates nudge
   // 3. exam session coming and no exam dates yet: the 6-week campaign can't start without them
   let nudge = '';
   if (!state.subjects.some(su => su.exam) && state.semEnd && !(state.dismiss || {})['examDates']) {
     const left = (fromIso(state.semEnd) - fromIso(todayIso())) / 864e5;
     if (left <= 45 && left >= -20) nudge = `<div class="prop"><b>Tes dates d’examens ?</b><p>La session approche. Avec les dates (IS-Academia → Mon plan d’examens), l’app lance 6 semaines avant chaque examen une campagne de révision en 3 passes, en tenant compte du Liban.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-act="editExam" data-v="${esc((state.subjects[0] || {}).id || '')}">Ajouter une date</button><button type="button" class="btn" data-act="dismiss" data-v="examDates">Plus tard</button></div></div>`;
   }
-  return mdProposal() || nudge;
+  return mdProposal() || winter || nudge;
 }
 
 /* ---------- course rooms ---------- */
@@ -1941,6 +1956,7 @@ document.addEventListener('click', async e => {
     case 'roomAdd': roomSheet(v); return;
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'exDocs': exDocsSheet(v, b.dataset.w); return;
+    case 'winterExams': { beginChange(); for (const x of WINTER) { const su = subjOf(state, x.subj); if (su) Object.assign(su, { exam: x.date, examStart: x.s, examEnd: x.e, examRoom: x.room }); } (state.dismiss = state.dismiss || {})['winter27'] = 1; save(); renderAll(); endChange('Session d’hiver ajoutée', '4 examens du 11 au 22 janvier. La campagne de révision démarre 6 semaines avant chacun.'); return; }
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); state.corrMan = state.corrMan || {}; (state.corrMan[wk] = state.corrMan[wk] || {})[v] = 1; done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;

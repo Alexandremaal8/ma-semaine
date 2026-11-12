@@ -314,6 +314,11 @@ function layoutDay(S, m, weekStart, d) {
       return parts;
     });
   }
+  // an exam with its time is a morning on campus: wake-up, commute and leave-home reminder like a course
+  S.subjects.filter(su => su.exam === dIso && su.examStart != null && su.examEnd > su.examStart).forEach(su => {
+    courses = courses.filter(c => c.end <= su.examStart || c.start >= su.examEnd);
+    courses.push({ id: 'exam-' + su.id, day: d, start: su.examStart, end: su.examEnd, subj: su.id, type: 'Examen', room: su.examRoom || '' });
+  });
   courses.sort((a, b) => a.start - b.start);
   const firstC = courses.length ? courses[0].start : null;
   const lastC = courses.length ? Math.max(...courses.map(c => c.end)) : null;
@@ -326,9 +331,10 @@ function layoutDay(S, m, weekStart, d) {
   courses.forEach(c => { const su = subjOf(S, c.subj);
     // exercise sessions are when the série gets done: a série block (checkable, counted in the série's time)
     if (c.type === 'Exercices' && su && su.serie) { ev.push({ kind: 'fixed', exo: true, start: c.start, end: c.end, title: 'Séance d’exercices', subj: c.subj, fsub: [su.name, c.room].filter(Boolean).join(' · '), cid: c.id, room: c.room || '' }); return; }
+    if (c.type === 'Examen') { ev.push({ kind: 'course', start: c.start, end: c.end, title: 'Examen · ' + (su ? su.name : ''), sub: [c.room, 'bonne chance !'].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, room: c.room || '', exam: true }); return; }
     ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id, room: c.room || '' }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
-  S.subjects.filter(su => su.exam === dIso).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
+  S.subjects.filter(su => su.exam === dIso && !(su.examStart != null && su.examEnd > su.examStart)).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
   dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
   // project sessions with your partner (one date, or every week until the due date)
   for (const p of S.projects || []) for (const ss of p.sessions || []) {
@@ -362,8 +368,12 @@ function layoutDay(S, m, weekStart, d) {
     for (let k = 0; k < 40 && !free(ret, ret + COMMUTE); k++) ret += 15;
     goHome = ret;
     if (free(ret, ret + COMMUTE)) ev.push({ kind: 'move', start: ret, end: ret + COMMUTE, title: 'EPFL → maison' });
+    // exam morning: nothing new before it, just your summary sheet
+    const ex = courses.find(c => c.type === 'Examen');
+    if (ex && ex.start === firstC) { const a0 = Math.max(wake + 35, ...busy().filter(b => b.end <= firstC - COMMUTE - 5 && b.start < wake + 60).map(b => b.end)), b0 = firstC - COMMUTE - 5;
+      if (b0 - a0 >= 15 && free(a0, b0)) ev.push({ kind: 'rest', start: a0, end: b0, title: 'Avant l’examen', sub: 'relis ta fiche, rien de nouveau · respire' }); }
   }
-  for (const s of [720, 735, 705, 750, 780, 795, 690]) if (free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: courses.some(c => c.start < s + 120 && c.end > s - 60) ? 'Midi à l’EPFL' : 'Midi' }); break; }
+  for (const s of [720, 735, 705, 750, 780, 795, 690]) if (free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: courses.some(c => c.start < s + 120 && c.end > s - 60) && (goHome == null || s < goHome) ? 'Midi à l’EPFL' : 'Midi' }); break; }
   const wind = sleep - 30;
   ev.push({ kind: 'rest', start: wind, end: sleep, title: 'Écrans off, routine du soir' });
   for (const s of [1140, 1155, 1170, 1185, 1200, 1110, 1095]) if (s + 45 <= wind && free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: 'Souper' }); break; }
