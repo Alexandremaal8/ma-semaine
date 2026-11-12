@@ -197,3 +197,24 @@ console.log('focus OK');
   assert.equal(L.sportProgress(S, 'b1', [40, 38, 36]).lvl, 2, 'far too easy: skip a variant');
   console.log('final pass OK');
 }
+{
+  // a mock that is over (or that you finished revising for): its revision blocks go away, done or not, and never come back
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  S.mocks = [{ id: 'm1', subj: 'alg', date: '2026-11-13', start: 495, end: 600 }];
+  const ws = L.mondayOf(new Date(2026, 10, 9)), revs = g => g.flatMap(x => x.ev.filter(e => e.kind === 'study' && /examen blanc/.test(e.title)).map(e => x.d + ' ' + e.state));
+  const before = revs(L.generate(S, ws, new Date(2026, 10, 10, 6)));
+  assert.ok(before.length >= 2, 'revision planned before the mock: ' + before);
+  const thu = revs(L.generate(S, ws, new Date(2026, 10, 12, 22)));
+  assert.ok(thu.some(x => /missed/.test(x)), 'not ticked → missed the evening before');
+  S.mocks[0].ready = true;
+  const done = revs(L.generate(S, ws, new Date(2026, 10, 12, 22)));
+  assert.ok(!done.some(x => /missed|todo/.test(x)), '"fini de réviser": none left, not even missed: ' + done);
+  const missedAlg = L.generate(S, ws, new Date(2026, 10, 12, 22)).flatMap(x => x.ev.filter(e => e.kind === 'study' && e.state === 'missed' && e.subj === 'alg' && !e.serie));
+  assert.ok(!missedAlg.length, 'no generic alg revision popping up in their place: ' + missedAlg.map(e => e.title));
+  delete S.mocks[0].ready;
+  const after = revs(L.generate(S, ws, new Date(2026, 10, 14, 10)));
+  assert.ok(!after.some(x => /missed|todo/.test(x)), 'after the mock: gone by itself: ' + after);
+  const meta = L.generate(S, ws, new Date(2026, 10, 14, 10)).meta;
+  S.mocks = []; const meta0 = L.generate(S, ws, new Date(2026, 10, 14, 10)).meta;
+  console.log('mock over OK');
+}

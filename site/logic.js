@@ -419,9 +419,9 @@ function examWeight(S, su, date) {
   else if (ahead && !inSemester(S, mondayOf(date))) b = 0;  // no exam this session, semester over
   else if (S.mode === 'exam') b = .35;
   for (const mk of S.mocks || []) {
-    if (mk.subj !== su.id || !mk.date) continue;
+    if (mk.subj !== su.id || !mk.date || mk.ready) continue;
     const dd = (fromIso(mk.date) - date) / 864e5;
-    if (dd >= -4 && dd <= 10) b = Math.max(b, 2.2);
+    if (dd >= 0 && dd <= 10) b = Math.max(b, 2.2);
   }
   return (PRIO_W[su.prio] || 1) * b;
 }
@@ -635,7 +635,7 @@ function generate(S0, weekStart, now) {
   const serieLabel = (su, isCarry) => isCarry ? 'Série en retard' : (wkN ? 'Série ' + wkN : 'Série d’exercices');
   // why a revision block exists: an exam or a mock exam coming up beats the generic label
   const revReason = (subj, date) => {
-    const mk = (S.mocks || []).find(x => x.subj === subj && x.date && fromIso(x.date) >= date && (fromIso(x.date) - date) / 864e5 <= 10);
+    const mk = (S.mocks || []).find(x => x.subj === subj && x.date && !x.ready && fromIso(x.date) >= date && (fromIso(x.date) - date) / 864e5 <= 10);
     if (mk) return 'Révision pour l’examen blanc (' + DAYS[dow(fromIso(mk.date))].toLowerCase() + ' ' + fromIso(mk.date).getDate() + ')';
     const su = subjOf(S, subj);
     if (su && su.exam && fromIso(su.exam) > date && (fromIso(su.exam) - date) / 864e5 <= EXAM_CAMPAIGN) return 'Examen du ' + dateLbl(fromIso(su.exam)) + ' · ' + EXAM_PASSES[examPass(S, su.exam, date)][0];
@@ -740,10 +740,11 @@ function generate(S0, weekStart, now) {
   const blOpen = backlogOpen(S);
   const blCap = +m.bl || 0;
   const mkBl = () => ({ cap: blCap, dayUsed: {}, items: blOpen.map(x => ({ id: x.id, title: x.title, subj: x.subj, left: x.left })) });
-  const mkPrep = () => {
+  const mkPrep = (forBase) => {
     const out = {};
     for (const mk of S.mocks || []) {
-      if (!mk.date || !subjOf(S, mk.subj)) continue;
+      // (the reference plan keeps a mock you finished revising for, so its past blocks are recognised and dropped)
+      if (!mk.date || !subjOf(S, mk.subj) || (mk.ready && !forBase)) continue;
       const md = fromIso(mk.date);
       if (md < weekStart || md >= addDays(weekStart, 10)) continue;   // a Monday mock is prepared the weekend before
       // revision time before a mock: more for the subjects that matter most
@@ -768,7 +769,7 @@ function generate(S0, weekStart, now) {
     return Object.keys(out).length ? out : null;
   };
   const doneMapAll = S.done[key] || {};
-  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr), blOpen.length && blCap ? mkBl() : null, mkPrep());
+  assignInto(base, clone(must), clone(carry), clone(rev), clone(corr), blOpen.length && blCap ? mkBl() : null, mkPrep(true));
 
   // 2. live plan: done work comes off the budgets, unfinished work moves to the blocks still ahead
   const doneMap = S.done[key] || {};
@@ -809,6 +810,12 @@ function generate(S0, weekStart, now) {
   }
   // the chrono is the proof: a block whose time ends without a chrono counts as not done.
   // A chrono started late or running over: the blocks it runs into wait for it instead of counting as missed.
+  const todayIsoNow = iso(now);
+  const overRev = new Set();
+  for (const mk of S.mocks || []) if (mk.date && (mk.ready || mk.date <= todayIsoNow) && subjOf(S, mk.subj)) { const md = fromIso(mk.date); overRev.add(mk.subj + '|Révision pour l’examen blanc (' + DAYS[dow(md)].toLowerCase() + ' ' + md.getDate() + ')'); }
+  const examOver = su => su.exam && (su.exam <= todayIsoNow || su.examReady === su.exam);
+  // a revision block whose mock/exam is behind you: not shown, not counted late, never back
+  const dropped = b => b && b.subj && b.title && (overRev.has(b.subj + '|' + b.title) || (/^Examen du /.test(b.title) && examOver(subjOf(S, b.subj) || {})));
   const running = S.focus && S.focus.run && S.focus.run.start ? S.focus.run : null;
   // (a chrono forgotten for hours stops holding the blocks after 4 h)
   const underRun = s => running && s.endT > running.start && s.startT < nowT && s.startT < running.start + 4 * 3600e3;
@@ -816,6 +823,7 @@ function generate(S0, weekStart, now) {
   for (const f of frozen) {
     const id = idOf(f.d, f), rec = doneMap[id];
     if (rec && typeof rec === 'object') live.push(Object.assign({}, f, rec.focus && rec.rs != null && rec.m ? realTimes(f, rec) : {}, { id, title: rec.t || f.title, subj: rec.s, state: 'done', part: rec.p }));
+    else if (dropped(f)) continue;
     else if (f.endT <= nowT && underRun(f)) live.push(Object.assign({}, f, { id, state: 'todo', underRun: true }));
     else if (f.endT <= nowT) { const pre = f.endT <= sinceT; if (!pre) lateMin += f.len; live.push(Object.assign({}, f, { id, state: pre ? 'pre' : 'missed' })); }
     else {
@@ -836,6 +844,7 @@ function generate(S0, weekStart, now) {
       else live.push(Object.assign({}, s, recLen && recLen < s.len ? { end: s.start + recLen, endT: s.startT + recLen * 6e4, len: recLen } : {}, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
     }
     else if (underRun(s)) live.push(Object.assign({}, b, { id, state: 'todo', underRun: true }));
+    else if (s.endT <= nowT && dropped(b)) return;
     else if (s.endT <= nowT) {
       const pre = s.endT <= sinceT;
       if (!pre) lateMin += s.len;

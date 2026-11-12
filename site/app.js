@@ -1244,12 +1244,13 @@ function revLine(e, key, xdate, dayEv) {
   if (e.kind !== 'study' || !e.subj || !/examen blanc/.test(e.title)) return '';
   const m = /\((\S+) (\d{1,2})\)/.exec(e.title); const mock = (state.mocks || []).filter(x => x.subj === e.subj && x.date >= key).sort((a, b) => a.date < b.date ? -1 : 1).find(x => fromIso(x.date).getDate() === +(m ? m[2] : -1));
   if (!mock) return '';
+  const ready = e.state !== 'done' ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="mockReady" data-v="${esc(mock.id)}">J’ai fini de réviser pour ce blanc</button></div>` : '';
   const { topics, plan } = revPlan(e.subj, mock.date), idx = plan[e.id] || [];
-  if (!idx.length) return `<div class="su rev">Tout est couvert : refais les exos qui t’ont posé problème.</div>`;
+  if (!idx.length) return `<div class="su rev">Tout est couvert : refais les exos qui t’ont posé problème.</div>${ready}`;
   const ts = idx.map(i => topics[i]);
   const label = ts.length <= 3 ? ts.map(t => t.label + (t.sub ? ' (' + t.sub + ')' : '')).join(', ') : ts[0].label + ' → ' + ts[ts.length - 1].label;
   const hasFiles = ts.some(t => t.files.length);
-  return `<div class="su rev"><b>À réviser :</b> ${esc(label)}</div>${hasFiles ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="revDocs" data-v="${esc(e.subj)}" data-d="${esc(mock.date)}" data-id="${esc(e.id)}">Docs à réviser</button></div>` : ''}`;
+  return `<div class="su rev"><b>À réviser :</b> ${esc(label)}</div>${hasFiles ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="revDocs" data-v="${esc(e.subj)}" data-d="${esc(mock.date)}" data-id="${esc(e.id)}">Docs à réviser</button></div>` : ''}${ready}`;
 }
 function revDocsSheet(subj, mockIso, id) {
   const { topics, plan } = revPlan(subj, mockIso), idx = plan[id] || [];
@@ -2094,6 +2095,7 @@ document.addEventListener('click', async e => {
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'exDocs': exDocsSheet(v, b.dataset.w); return;
     case 'winterExams': { beginChange(); for (const x of WINTER) { const su = subjOf(state, x.subj); if (su) Object.assign(su, { exam: x.date, examStart: x.s, examEnd: x.e, examRoom: x.room }); } (state.dismiss = state.dismiss || {})['winter27'] = 1; save(); renderAll(); endChange('Session d’hiver ajoutée', '4 examens du 11 au 22 janvier. La campagne de révision démarre 6 semaines avant chacun.'); return; }
+    case 'mockReady': { beginChange(); const mk = (state.mocks || []).find(x => x.id === v); if (mk) mk.ready = true; save(); renderAll(); endChange('Révisions du blanc terminées', 'Les blocs de révision restants pour ce blanc sont retirés, cochés ou pas.'); return; }
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); state.corrMan = state.corrMan || {}; (state.corrMan[wk] = state.corrMan[wk] || {})[v] = 1; done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
