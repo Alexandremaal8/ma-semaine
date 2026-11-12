@@ -803,9 +803,15 @@ function generate(S0, weekStart, now) {
     }
     revLeft[e.subj] = Math.max(0, (revLeft[e.subj] || 0) - len);
   }
+  // the chrono is the proof: a block whose time ends without a chrono counts as not done.
+  // A chrono started late or running over: the blocks it runs into wait for it instead of counting as missed.
+  const running = S.focus && S.focus.run && S.focus.run.start ? S.focus.run : null;
+  const underRun = s => running && s.endT > running.start && s.startT < nowT;
+  function realTimes(s, rec) { const st = rec.rs, ln = Math.max(5, Math.round(rec.m)); return { start: st, end: st + ln, startT: s.date.getTime() + st * 6e4, endT: s.date.getTime() + (st + ln) * 6e4, len: ln, real: true }; }
   for (const f of frozen) {
     const id = idOf(f.d, f), rec = doneMap[id];
-    if (rec && typeof rec === 'object') live.push(Object.assign({}, f, { id, title: rec.t || f.title, subj: rec.s, state: 'done', part: rec.p }));
+    if (rec && typeof rec === 'object') live.push(Object.assign({}, f, rec.focus && rec.rs != null && rec.m ? realTimes(f, rec) : {}, { id, title: rec.t || f.title, subj: rec.s, state: 'done', part: rec.p }));
+    else if (f.endT <= nowT && underRun(f)) live.push(Object.assign({}, f, { id, state: 'todo', underRun: true }));
     else if (f.endT <= nowT) { const pre = f.endT <= sinceT; if (!pre) lateMin += f.len; live.push(Object.assign({}, f, { id, state: pre ? 'pre' : 'missed' })); }
     else {
       // block in progress at the moment of the change: keeps its task, which comes off the budgets
@@ -814,22 +820,31 @@ function generate(S0, weekStart, now) {
       else if (f.subj) revLeft[f.subj] = Math.max(0, (revLeft[f.subj] || 0) - f.len);
     }
   }
-  // the chrono is the proof: a block not started CHRONO_GRACE min after its start counts as not done
-  // (its work moves to the blocks ahead right away), unless a focus is running
-  const running = S.focus && S.focus.run;
-  const noChrono = s => S.chronoTruth !== false && !running && s.startT + CHRONO_GRACE * 6e4 <= nowT;
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
     const b = base[i];
     // a block done keeps the length it had when ticked (a slot can have been cut for a weekly task since)
     const recLen = rec && typeof rec === 'object' && rec.m ? Math.round(rec.p ? rec.m / rec.p : rec.m) : 0;
-    if (rec && typeof rec === 'object') live.push(Object.assign({}, s, recLen && recLen < s.len ? { end: s.start + recLen, endT: s.startT + recLen * 6e4, len: recLen } : {}, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
-    else if (s.endT <= nowT || noChrono(s)) {
+    if (rec && typeof rec === 'object') {
+      // a chrono shows when you really worked: its real start and its real length (late start, overtime)
+      if (rec.focus && rec.rs != null && rec.m) { live.push(Object.assign({}, s, realTimes(s, rec), { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p, real: true })); }
+      else live.push(Object.assign({}, s, recLen && recLen < s.len ? { end: s.start + recLen, endT: s.startT + recLen * 6e4, len: recLen } : {}, { id, title: rec.t || b.title, subj: rec.s, state: 'done', serie: rec.serie, corr: !!rec.c, bl: rec.b, late: !!rec.b, part: rec.p }));
+    }
+    else if (underRun(s)) live.push(Object.assign({}, b, { id, state: 'todo', underRun: true }));
+    else if (s.endT <= nowT) {
       const pre = s.endT <= sinceT;
       if (!pre) lateMin += s.len;
-      live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed', noChrono: s.endT > nowT || undefined }));
+      live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed' }));
     } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
   });
+  for (const it of live.filter(x => x.real)) for (let i = live.length - 1; i >= 0; i--) {
+    const o = live[i];
+    if (o === it || o.d !== it.d || o.state === 'done' || o.fixed || !(o.start < it.end && o.end > it.start)) continue;
+    if (o.state === 'missed') lateMin -= Math.min(o.len, Math.max(0, Math.min(o.end, it.end) - Math.max(o.start, it.start)));
+    if (o.start >= it.start && o.end <= it.end) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); }
+    else if (o.start >= it.start) { const cut = it.end; o.len = o.end - cut; o.start = cut; o.startT = o.date.getTime() + cut * 6e4; if (o.len < 15) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); } }
+    else { o.end = it.start; o.endT = o.date.getTime() + it.start * 6e4; o.len = o.end - o.start; if (o.len < 15) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); } }
+  }
   // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were
   // (fixed blocks like the Monday physics prep are already in the day: never show them twice)
   const slotIds = new Set(slots.concat(frozen).map(s => idOf(s.d, s)));
@@ -937,10 +952,10 @@ function generate(S0, weekStart, now) {
   for (const s of live) {
     const x = days[s.d];
     // a block shortened during planning may already be over
-    if (s.state === 'todo' && x.date.getTime() + s.end * 6e4 <= nowT) s.state = x.date.getTime() + s.end * 6e4 <= sinceT ? 'pre' : 'missed';
+    if (s.state === 'todo' && !s.underRun && x.date.getTime() + s.end * 6e4 <= nowT) s.state = x.date.getTime() + s.end * 6e4 <= sinceT ? 'pre' : 'missed';
     if (s.kind2 === 'ahead') { x.ev.push({ kind: 'free', start: s.start, end: s.end, title: 'Libre', sub: 'T’es en avance', id: s.id }); continue; }
     const su = s.subj ? subjOf(S, s.subj) : null;
-    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part, noChrono: s.noChrono });
+    x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part, underRun: s.underRun });
   }
   // a marker after the last série block of each subject: the série should be finished by then
   if (S.coursesOn) for (const su of S.subjects) {
@@ -1049,7 +1064,7 @@ function buildNotifications(S, now, horizonDays) {
         }
         if (e.kind === 'course' && N.course > 0) push(T(e.start - N.course), fmt(e.start) + ' · ' + e.title, (e.sub || 'Cours') + ' · dans ' + N.course + ' min', 'c' + e.id);
         if (e.kind === 'study' && N.study) push(T(e.start), (e.late || e.catchup ? 'Rattrapage · ' : 'Étude · ') + ((subjOf(S, e.subj) || {}).name || ''), e.title + ' · ' + hm(e.end - e.start) + '. Touche pour lancer le chrono.', 'focus-s' + e.id);
-        if (e.kind === 'study' && N.study && !e.fixed && S.chronoTruth !== false && e.end - e.start > CHRONO_GRACE && !(S.focus && S.focus.run)) push(T(e.start + CHRONO_GRACE - 5), 'Chrono pas lancé · ' + e.title, 'Lance-le dans les 5 min, sinon ce bloc compte comme pas fait et part plus tard.', 'focus-s' + e.id);
+        if (e.kind === 'study' && N.study && !e.fixed && S.chronoTruth !== false && e.end - e.start > 30 && !(S.focus && S.focus.run)) push(T(e.start + CHRONO_GRACE), 'Chrono pas lancé · ' + e.title, 'Lance-le quand tu commences. Sans chrono, ce bloc compte comme pas fait à ' + fmt(e.end) + '.', 'focus-s' + e.id);
         if (e.kind === 'sport' && N.sport) push(T(e.start - 10), e.title + (e.workout ? ' · ' + e.workout : '') + ' à ' + fmt(e.start), (e.workout ? 'Séance guidée dans l’app. ' : '') + 'Prends ta planche, ça commence dans 10 min.', 'sport-' + e.id);
         if (e.kind === 'routine' && N.routine) push(T(e.start), e.title, fmt(e.start) + '–' + fmt(e.end), 'r' + e.id);
         if (e.kind === 'event' && N.event > 0) push(T(e.start - N.event), e.title + ' à ' + fmt(e.start), (e.sub ? e.sub + ' · ' : '') + 'dans ' + N.event + ' min', 'e' + e.id);

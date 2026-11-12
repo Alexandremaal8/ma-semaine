@@ -152,19 +152,25 @@ console.log('focus OK');
   console.log('sport v2 OK');
 }
 {
-  // the chrono is the proof: not started 15 min after the start → not done, its work moves on
+  // the chrono is the proof, at the END of the block; late start and overtime adapt
   const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
-  const ws = L.mondayOf(new Date(2026, 10, 9));
-  const g0 = L.generate(S, ws, new Date(2026, 10, 14, 9, 0));
-  const b = g0[5].ev.find(e => e.kind === 'study' && !e.fixed && e.start >= 600);
+  const ws = L.mondayOf(new Date(2026, 10, 9)), wk = L.iso(ws);
+  const b = L.generate(S, ws, new Date(2026, 10, 14, 9, 0))[5].ev.find(e => e.kind === 'study' && !e.fixed && e.start >= 600);
   const at = m => new Date(2026, 10, 14, Math.floor(m / 60), m % 60);
-  const st = (S2, m) => L.generate(S2, ws, at(m))[5].ev.find(e => e.id === b.id);
-  assert.equal(st(S, b.start + 10).state, 'todo', 'still time to start it');
-  const late = st(S, b.start + 16);
-  assert.ok(late.state === 'missed' && late.noChrono, 'no chrono after 15 min → not done');
-  S.focus = { run: { id: b.id, start: at(b.start + 2).getTime() } };
-  assert.equal(st(S, b.start + 16).state, 'todo', 'a chrono running keeps it');
-  S.focus = {}; S.chronoTruth = false;
-  assert.equal(st(S, b.start + 16).state, 'todo', 'can be turned off');
+  const day = (m) => L.generate(S, ws, at(m))[5].ev.filter(e => e.kind === 'study');
+  const st = m => day(m).find(e => e.id === b.id);
+  assert.equal(st(b.start + 30).state, 'todo', 'no chrono yet but the block is not over');
+  assert.equal(st(b.end + 1).state, 'missed', 'over without chrono → not done');
+  // chrono started 10 min late, running over into the next block
+  S.focus = { run: { id: b.id, start: at(b.start + 10).getTime() } };
+  const nxt = day(b.start).find(e => e.start >= b.end && !e.fixed);
+  const during = day(nxt.end + 1).find(e => e.id === nxt.id);
+  assert.ok(during && during.state === 'todo', 'the next block waits for the running chrono');
+  // stopped after 95 min: shows its real times, the next block makes room
+  S.focus = {}; S.done[wk] = { [b.id]: { s: b.subj, t: b.title, m: 95, d: 5, a: b.start, rs: b.start + 10, focus: true, serie: b.serie } };
+  const after = day(b.start + 120);
+  const me = after.find(e => e.id === b.id);
+  assert.ok(me.start === b.start + 10 && me.end === b.start + 105, 'real times: ' + me.start + '-' + me.end);
+  assert.ok(!after.some(e => e !== me && e.state !== 'done' && e.start < me.end && e.end > me.start), 'nothing overlaps the real block');
   console.log('chrono truth OK');
 }

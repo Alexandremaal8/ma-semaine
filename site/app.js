@@ -1318,6 +1318,11 @@ function foStart(opt) {
   if (sw) toast(`À la place de « ${sw.title} » : il passe plus tard, ton planning est recalé.`);
 }
 // starting a block planned later while another one is planned now: swap them
+// minute of the day the chrono started, if it started that day (late start, overtime: the block shows its real times)
+function realStart(r, dayDate) {
+  const st = new Date(r.start); if (iso(st) !== iso(dayDate)) return null;
+  return Math.floor((st.getHours() * 60 + st.getMinutes()) / 5) * 5;
+}
 function foSwapSlot(fb, wk) {
   const e = fb.e, now = new Date();
   if (!e || e.fixed || e.kind !== 'study' || e.state === 'done' || wk !== iso(mondayOf(now))) return null;
@@ -1344,10 +1349,12 @@ function foStop(finished, after) {
     if (r.swap) {
       const sw = r.swap, ln = sw.len;
       d[sw.id] = Object.assign({}, sw.rec, { m: min, focus: true }, finished || min >= ln ? {} : { p: Math.max(.05, Math.min(.95, min / (r.plan || ln))) });
+      const rs = realStart(r, new Date(new Date(r.start).setHours(0, 0, 0, 0))); if (rs != null) d[sw.id].rs = rs;
     } else if (fb && !d[r.id]) {
       const ev = fb.e, plan = ev.end - ev.start;
       revRemember(wk, r.id, finished ? null : Math.min(.95, min / plan)); examRemember(wk, r.id, finished ? null : Math.min(.95, min / plan));
       d[r.id] = { s: ev.subj, t: ev.title, m: min, d: fb.x.d, a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined, focus: true };
+      const rs = realStart(r, fb.x.date); if (rs != null && !ev.fixed) d[r.id].rs = rs;
       if (!finished) d[r.id].p = Math.max(.05, Math.min(.95, min / plan));
     } else if (!r.id && r.subj) {
       // free session: it shows in the day and counts for that subject
@@ -1598,9 +1605,9 @@ function foBtn(e, key, sel) {
   const r = foRun();
   if (r && r.id === e.id) return `<div class="md-links"><button type="button" class="linkbtn mini fo on" data-act="foOpen">● Focus en cours · ${mmss2(foElapsed(r))}</button></div>`;
   // block under way without its chrono: how long before it counts as not done
-  const n = new Date(), nm = n.getHours() * 60 + n.getMinutes(), left = e.start + L.CHRONO_GRACE - nm;
-  const warn = state.chronoTruth !== false && !e.fixed && e.state === 'todo' && !r && nm >= e.start && left > 0 ? ` <span class="fo-warn">sinon compté pas fait dans ${left} min</span>` : '';
-  const miss = e.noChrono ? ` <span class="fo-warn">pas lancé · replacé plus tard</span>` : '';
+  const n = new Date(), nm = n.getHours() * 60 + n.getMinutes();
+  const warn = state.chronoTruth !== false && !e.fixed && e.state === 'todo' && !r && nm >= e.start && nm < e.end ? ` <span class="fo-warn">sans chrono : compté pas fait à ${fmt(e.end)}</span>` : '';
+  const miss = e.underRun ? ` <span class="fo-warn">ton chrono déborde ici : ça s’adapte</span>` : '';
   return `<div class="md-links"><button type="button" class="linkbtn mini fo" data-act="foGo" data-v="${esc(e.id)}" data-w="${key}">▶ Focus</button>${warn}${miss}</div>`;
 }
 function linkCard() {
@@ -1944,7 +1951,7 @@ function renderSet() {
     <div class="sec-t">Mode</div>
     ${(() => { const c = cfgOf(iso(mondayOf(new Date()))); return `<div class="group">
       <label class="row-sw"><span class="bd"><span class="ti">Choix automatique du mode</span><span class="su">Avance avant un voyage, Exam avant les examens, Rattrapage si le retard ne rentre plus</span></span><input type="checkbox" class="sw" data-auto="1" ${state.autoMode !== false ? 'checked' : ''}></label>
-      <label class="row-sw"><span class="bd"><span class="ti">Le chrono fait foi</span><span class="su">Un bloc sans chrono lancé ${L.CHRONO_GRACE} min après son début compte comme pas fait et part plus tard. Plus de question « T’as fini ce bloc ? ».</span></span><input type="checkbox" class="sw" data-chrono="1" ${state.chronoTruth !== false ? 'checked' : ''}></label>
+      <label class="row-sw"><span class="bd"><span class="ti">Le chrono fait foi</span><span class="su">Un bloc dont l’heure se termine sans chrono compte comme pas fait et part plus tard. Chrono lancé en retard ou qui déborde : ça s’adapte. Plus de question « T’as fini ce bloc ? ».</span></span><input type="checkbox" class="sw" data-chrono="1" ${state.chronoTruth !== false ? 'checked' : ''}></label>
       <button type="button" class="li" data-act="modeSheet" style="--c:${MODE_COLORS[c.mode]}"><span class="dt"></span><span class="bd"><span class="ti">Cette semaine : ${MODE_META[c.mode].name}${c.coursesOn ? '' : ' · sans cours'}</span><span class="su">${c.source === 'manual' ? 'Choisi par toi' : c.source === 'auto' ? 'Automatique · ' + esc(c.why) : 'Mode habituel'}</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="baseModeSheet"><span class="bd"><span class="ti">Mode habituel : ${MODE_META[state.mode].name}</span><span class="su">Pour les semaines sans rien de spécial</span></span>${CHEV}</button>
       <button type="button" class="li" data-act="tuneMode" data-v="${c.mode}"><span class="bd"><span class="ti">Ajuster le mode ${MODE_META[c.mode].name}</span><span class="su">Heures d’étude par semaine, week-end, rattrapage</span></span>${CHEV}</button></div>`; })()}
