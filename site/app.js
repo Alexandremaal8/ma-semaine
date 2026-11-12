@@ -42,16 +42,43 @@ const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else 
 const syncKey = () => lsGet(KEY_LS);
 const localUpdated = () => +(lsGet(UPD_LS) || 0);
 let pulling = false;
-async function pull(force) {
+const unpushed = () => { const k = syncKey(); return !!k && localUpdated() > 0 && lsGet(LS + '-pushed') !== k + ':' + localUpdated(); };
+// two icons (or two devices) changed things at the same time: keep both instead of the last one erasing the other
+function mergeStates(remote, local) {
+  const R = L.normalize(JSON.parse(JSON.stringify(remote)));
+  const byKey = (a, b, key) => { const m = new Map(); for (const x of (a || []).concat(b || [])) if (x) m.set(key(x), Object.assign({}, m.get(key(x)) || {}, x)); return [...m.values()]; };
+  R.done = R.done || {};
+  for (const [wk, recs] of Object.entries(local.done || {})) {
+    const out = R.done[wk] = R.done[wk] || {};
+    for (const [id, v] of Object.entries(recs || {})) { const o = out[id]; if (!o || (o.live && !v.live) || (typeof v === 'object' && typeof o === 'object' && !(v.live && !o.live))) out[id] = v; }
+  }
+  for (const k of ['serieProg', 'serieEst', 'serieDone', 'corrSeen', 'corrMan', 'revDone', 'examDone', 'mdNames']) {
+    if (!local[k]) continue; R[k] = R[k] || {};
+    for (const [wk, m] of Object.entries(local[k])) R[k][wk] = m && typeof m === 'object' && !Array.isArray(m) ? Object.assign({}, R[k][wk] || {}, m) : m;
+  }
+  const lf = local.focus || {}, rf = R.focus = R.focus || {};
+  rf.log = byKey(rf.log, lf.log, x => x.at + ':' + (x.id || '')).sort((a, b) => a.at - b.at).slice(-400);
+  const ended = st => rf.log.some(x => x.at === st);
+  const runs = [rf.run, lf.run].filter(r => r && !ended(r.start)).sort((a, b) => b.start - a.start);
+  rf.run = runs[0] || null;
+  const lastAt = st => Math.max(0, ...(st.sportLog || []).map(x => x.at));
+  const localSport = lastAt(local) > lastAt(R);
+  R.sportLog = byKey(R.sportLog, local.sportLog, x => x.at).sort((a, b) => a.at - b.at).slice(-150);
+  if (localSport) { R.sportProg = local.sportProg; R.sportNext = local.sportNext; }
+  return R;
+}
+async function pull(force, replace) {
   const k = syncKey(); if (!WORKER || !k) return false;
   pulling = true;
   try {
     const r = await (await fetch(WORKER + '/store?k=' + k, { cache: 'no-store' })).json();
     if (r && r.state && (force || r.updated > localUpdated())) {
       const notifOn = state.notif.on;              // reminders are per device
-      state = L.normalize(r.state); state.notif.on = notifOn;
-      lsSet(LS, JSON.stringify(state)); lsSet(UPD_LS, String(r.updated));
-      renderAll();
+      const mine = !replace && unpushed() ? state : null;      // changes made here and not sent yet are kept
+      state = mine ? mergeStates(r.state, mine) : L.normalize(r.state); state.notif.on = notifOn;
+      lsSet(LS, JSON.stringify(state)); lsSet(UPD_LS, String(mine ? Math.max(Date.now(), r.updated + 1) : r.updated));   // a merge is newer than what it merged, even with clocks a bit off
+      renderAll(); if (tab === 'focus') renderFocus(); if (tab === 'sport') renderSport();
+      if (mine) setTimeout(pushState, 300);
       return true;
     }
     if (r && !r.state && localUpdated()) pushState();
@@ -78,6 +105,7 @@ function save() {
   lsSet(UPD_LS, String(Date.now()));
   clearTimeout(syncTimer); syncTimer = setTimeout(syncAll, 2500);
 }
+function syncSoon() { clearTimeout(syncTimer); syncTimer = setTimeout(syncAll, 200); }
 async function getSub() {
   if (!('serviceWorker' in navigator)) return null;
   const reg = await navigator.serviceWorker.ready;
@@ -1278,8 +1306,27 @@ function foStart(opt) {
   if (cur) { toast('Un focus tourne déjà : termine-le d’abord'); foOpen(); return; }
   beginChange();
   unlockAudio(); keepAwake(true); foLastPhase = '';
-  FO().run = { id: opt.id || null, wk: opt.wk || null, subj: opt.subj || null, title: opt.title || 'Focus libre', plan: opt.plan || 0, start: Date.now(), paused: 0, pauseAt: null, pomo: !!opt.pomo, fixed: !!opt.fixed };
-  save(); endChange(); foOpen(); renderFocusBar();
+  const run = FO().run = { id: opt.id || null, wk: opt.wk || null, subj: opt.subj || null, title: opt.title || 'Focus libre', plan: opt.plan || 0, start: Date.now(), paused: 0, pauseAt: null, pomo: !!opt.pomo, fixed: !!opt.fixed };
+  const sw = opt.swap;
+  if (sw) {
+    // a later block taken now: it goes in the slot of the block that was planned now, which moves later
+    run.swap = sw;
+    const d = state.done[run.wk] = state.done[run.wk] || {};
+    d[sw.id] = Object.assign({}, sw.rec, { m: Math.min(sw.len, run.plan || sw.len), focus: true, live: true });
+  }
+  save(); renderAll(); endChange(); foOpen(); renderFocusBar(); syncSoon();
+  if (sw) toast(`À la place de « ${sw.title} » : il passe plus tard, ton planning est recalé.`);
+}
+// starting a block planned later while another one is planned now: swap them
+function foSwapSlot(fb, wk) {
+  const e = fb.e, now = new Date();
+  if (!e || e.fixed || e.kind !== 'study' || e.state === 'done' || wk !== iso(mondayOf(now))) return null;
+  if (fb.x.date.getTime() + e.start * 6e4 <= now.getTime() + 10 * 6e4) return null;
+  const td = fb.days.find(x => iso(x.date) === todayIso()); if (!td) return null;
+  const nm = now.getHours() * 60 + now.getMinutes();
+  const a = td.ev.filter(z => z.kind === 'study' && !z.fixed && z.id !== e.id && z.state === 'todo' && z.start <= nm + 10 && z.end > nm + 5).sort((p, q) => p.start - q.start)[0];
+  if (!a) return null;
+  return { id: a.id, title: a.title, len: a.end - a.start, rec: { s: e.subj, t: e.title, d: td.d, a: a.start, serie: e.serie, c: !!e.corr || undefined, b: e.bl || undefined, moved: e.id } };
 }
 function foPause() { const r = foRun(); if (!r) return; if (r.pauseAt) { r.paused += Date.now() - r.pauseAt; r.pauseAt = null; } else r.pauseAt = Date.now(); save(); foPaint(); }
 // end: finished → the block is ticked with the real time; not finished → ticked at the share done, the rest gets replanned
@@ -1289,11 +1336,15 @@ function foStop(finished, after) {
   beginChange();
   const f = FO(); f.run = null; keepAwake(false);
   f.log = (f.log || []).concat([{ at: r.start, end: Date.now(), wk: r.wk, id: r.id, subj: r.subj, title: r.title, ms, plan: r.plan || 0, fin: !!finished }]).slice(-400);
+  if (min < 3 && r.swap && r.wk) { const d = state.done[r.wk] || {}; if (d[r.swap.id] && d[r.swap.id].live) delete d[r.swap.id]; }
   if (min >= 3) {
     const wk = r.wk || iso(mondayOf(new Date(r.start)));
     const d = state.done[wk] = state.done[wk] || {};
-    const fb = r.id ? findBlock(wk, r.id) : null;
-    if (fb && !d[r.id]) {
+    const fb = r.id && !r.swap ? findBlock(wk, r.id) : null;
+    if (r.swap) {
+      const sw = r.swap, ln = sw.len;
+      d[sw.id] = Object.assign({}, sw.rec, { m: min, focus: true }, finished || min >= ln ? {} : { p: Math.max(.05, Math.min(.95, min / (r.plan || ln))) });
+    } else if (fb && !d[r.id]) {
       const ev = fb.e, plan = ev.end - ev.start;
       revRemember(wk, r.id, finished ? null : Math.min(.95, min / plan)); examRemember(wk, r.id, finished ? null : Math.min(.95, min / plan));
       d[r.id] = { s: ev.subj, t: ev.title, m: min, d: fb.x.d, a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined, focus: true };
@@ -1305,10 +1356,10 @@ function foStop(finished, after) {
     }
   }
   const more = after && min >= 3 ? after(r, min) : '';
-  save(); renderAll(); endChange(min >= 3 ? 'Focus enregistré' : 'Focus arrêté', min >= 3 ? `${esc(r.title)} · ${hm(min)} de vrai travail${r.plan ? ' (prévu ' + hm(r.plan) + ')' : ''}. ` + (more || 'Ton planning tient compte du temps réel.') : 'Moins de 3 min : rien d’enregistré.');
+  save(); syncSoon(); renderAll(); endChange(min >= 3 ? 'Focus enregistré' : 'Focus arrêté', min >= 3 ? `${esc(r.title)} · ${hm(min)} de vrai travail${r.plan ? ' (prévu ' + hm(r.plan) + ')' : ''}. ` + (more || 'Ton planning tient compte du temps réel.') : 'Moins de 3 min : rien d’enregistré.');
   foPaint(); renderFocusBar();
 }
-function foCancel() { const r = foRun(); if (!r) return; FO().run = null; keepAwake(false); save(); foPaint(); renderFocusBar(); toast('Focus annulé, rien d’enregistré'); }
+function foCancel() { const r = foRun(); if (!r) return; FO().run = null; if (r.swap && r.wk) { const d = state.done[r.wk] || {}; if (d[r.swap.id] && d[r.swap.id].live) delete d[r.swap.id]; renderAll(); } keepAwake(false); save(); foPaint(); renderFocusBar(); toast('Focus annulé, rien d’enregistré'); }
 // what to start now: the block in progress, else the next one today
 function foSuggest() {
   const now = new Date(), wk = iso(mondayOf(now)), days = L.generate(state, mondayOf(now)), x = days[dow(now)], mins = now.getHours() * 60 + now.getMinutes();
@@ -1368,7 +1419,7 @@ function foEndSheet() {
   const r = foRun(); if (!r) return;
   const min = Math.round(foElapsed(r) / 6e4);
   if (!r.id) { foStop(true); return; }
-  const fb = r.wk ? findBlock(r.wk, r.id) : null, sc = fb && min >= 3 ? serieCtx(fb.e, r.wk) : null;
+  const fb = r.wk ? findBlock(r.wk, r.swap ? r.swap.id : r.id) : null, sc = fb && min >= 3 ? serieCtx(fb.e, r.wk) : null;
   if (sc) { serieSheet(sc, { r, min }); return; }
   openSheet('Fin du focus', `<p style="margin:0 0 14px;color:var(--muted)">${esc(r.title)} · ${hm(Math.max(1, min))} de travail${r.plan ? ' sur ' + hm(r.plan) + ' prévues' : ''}.</p>
     <div class="btns" style="flex-direction:column;align-items:stretch;padding:0"><button type="button" class="btn pri" data-act="foStop" data-v="1">Bloc fini ✓</button><button type="button" class="btn" data-act="foStop" data-v="0">Pas fini · replanifie le reste</button></div>`);
@@ -1462,7 +1513,7 @@ function focusAction(a, v, b) {
     case 'foOpen': foOpen(); return true;
     case 'foGo': {
       const fb = findBlock(b.dataset.w, v); if (!fb) { toast('Bloc introuvable'); return true; }
-      const e = fb.e; foStart({ id: e.id, wk: b.dataset.w, subj: e.subj, title: e.title, plan: e.end - e.start, pomo: !!state.focusPomo, fixed: !!e.fixed });
+      const e = fb.e; foStart({ id: e.id, wk: b.dataset.w, subj: e.subj, title: e.title, plan: e.end - e.start, pomo: !!state.focusPomo, fixed: !!e.fixed, swap: foSwapSlot(fb, b.dataset.w) });
       return true;
     }
     case 'foPause': foPause(); return true;
@@ -1505,7 +1556,7 @@ function renderSport() {
   const box = $('#sportBody'); if (!box) return;
   const nb = sportNextBlock(), light = sportLightWeek(), log = spLog();
   let h = APP !== 'main' ? linkCard() : `<button type="button" class="back" data-tab-go="today">‹ Aujourd’hui</button>`;
-  h += `<div class="sp-head"><h1>Sport</h1><p>Planche à pompes + câbles · 3 séances qui tournent, objectifs qui montent tout seuls.</p></div>`;
+  h += `<div class="sp-head"><h1>Sport</h1><p>Planche à pompes + poids du corps · 3 séances qui tournent, objectifs qui montent tout seuls.</p></div>`;
   if (light) h += `<div class="prop"><b>Semaine légère</b><p>Une série de moins par exercice, mêmes objectifs : c’est la semaine où tes muscles récupèrent et se renforcent. Ça revient à la normale la semaine prochaine.</p></div>`;
   if (nb) {
     const w = SP.workouts[nb.e.wi != null ? nb.e.wi : (state.sportNext || 0) % SP.workouts.length];
@@ -1580,13 +1631,64 @@ function sportPlanFor(key, days) {
   return out;
 }
 function sportWorkoutOf(key, id) { const ws = fromIso(key); const p = sportPlanFor(key, L.generate(state, ws, new Date())); return p[id] != null && p[id] >= 0 ? p[id] : (state.sportNext || 0) % SP.workouts.length; }
+// ——— little animated figures showing each movement (side view, drawn here: no outside images) ———
+const BOARD = '<rect x="80" y="55.5" width="22" height="2.5" rx="1"/><path d="M84 55.5v-2h4v2M94 55.5v-2h4v2"/>';
+const STAND = { h: [61, 5], n: [60, 11], p: [60, 29], k: [60, 43], f: [60, 57], e: [60, 20], w: [60, 28] };
+const PU_UP = { h: [98, 35], n: [90, 40], p: [60, 46], k: [38, 51], f: [16, 57], e: [90, 48], w: [90, 56] };
+const POSES = {
+  pushup: { props: BOARD, fr: [PU_UP, { h: [100, 48], n: [92, 51], p: [61, 52], k: [38, 54], e: [83, 45] }] },
+  pike: { props: BOARD, fr: [{ h: [80, 38], n: [76, 42], p: [52, 28], k: [40, 44], f: [30, 57], e: [82, 49], w: [88, 56] }, { h: [87, 51], n: [79, 50], p: [54, 30], e: [73, 46] }] },
+  dips: { props: '<path d="M80 36h22M84 36v22M100 36v22"/>', fr: [{ h: [75, 10], n: [75, 17], p: [73, 40], k: [53, 42], f: [51, 57], e: [78, 27], w: [81, 36] }, { h: [75, 21], n: [75, 28], p: [73, 50], k: [53, 47], e: [88, 30] }] },
+  plank: { fr: [{ h: [94, 43], n: [86, 46], p: [60, 48], k: [38, 52], f: [16, 57], e: [86, 57], w: [98, 57] }, { p: [60, 49.5] }], dur: 3 },
+  hollow: { fr: [{ h: [33, 47], n: [42, 51], p: [60, 56], k: [77, 50], f: [95, 45], e: [30, 46], w: [19, 42] }, { f: [95, 43], w: [19, 40], h: [33, 46] }], dur: 3 },
+  invrow: { props: '<path d="M56 21h50M60 21v37M102 21v37"/>', fr: [{ h: [80, 41], n: [72, 43], p: [50, 49], k: [33, 53], f: [16, 57], e: [72, 33], w: [72, 23] }, { h: [77, 28], n: [70, 31], p: [47, 44], k: [32, 51], e: [60, 33] }] },
+  cablerow: { props: '<rect x="52" y="55.5" width="22" height="2.5" rx="1"/>', cable: true, fr: [{ h: [82, 16], n: [76, 21], p: [56, 32], k: [62, 45], f: [60, 57], e: [78, 33], w: [78, 44] }, { e: [66, 30], w: [72, 38] }] },
+  squat: { fr: [Object.assign({}, STAND, { e: [68, 15], w: [78, 15] }), { h: [60, 18], n: [58, 25], p: [49, 42], k: [71, 44], e: [67, 25], w: [77, 23] }] },
+  sldl: { fr: [Object.assign({}, STAND, { k2: [61, 43], f2: [62, 56] }), { h: [90, 29], n: [82, 30], p: [58, 30], k: [60, 43], k2: [42, 30], f2: [26, 30], e: [82, 38], w: [82, 46] }] },
+  bridge: { fr: [{ h: [18, 52], n: [28, 55], p: [56, 56], k: [70, 42], f: [80, 57], e: [38, 57], w: [48, 57] }, { p: [56, 41] }] },
+  deadbug: { fr: [{ h: [20, 52], n: [30, 55], p: [62, 56], k: [62, 40], f: [78, 40], e: [32, 42], w: [34, 30] }, { k: [80, 49], f: [98, 53], e: [22, 47], w: [12, 45] }] },
+  lunge: { fr: [Object.assign({}, STAND, { k2: [60, 43], f2: [60, 57] }), { h: [59, 15], n: [58, 22], p: [58, 40], k: [72, 44], f: [70, 57], k2: [46, 55], f2: [36, 57], e: [58, 31], w: [58, 39] }] },
+  burpee: { fr: [Object.assign({}, STAND, { e: [67, 9], w: [73, 2] }), { h: [72, 24], n: [66, 30], p: [52, 44], k: [64, 46], f: [56, 57], e: [72, 44], w: [76, 56] }, Object.assign({}, PU_UP, { h: [88, 35], n: [80, 40], p: [50, 46], k: [28, 51], f: [6, 57], e: [80, 48], w: [80, 56] })], dur: 3 },
+  climber: { props: BOARD, fr: [Object.assign({}, PU_UP, { k2: [38, 51], f2: [16, 57] }), { k: [76, 47], f: [64, 56] }], dur: 1.2 },
+  sideplank: { fr: [{ h: [92, 29], n: [84, 33], p: [58, 44], k: [38, 51], f: [18, 57], e: [84, 57], w: [96, 57] }, { p: [58, 47] }], dur: 3 },
+  calf: { props: '<rect x="54" y="55" width="16" height="3" rx="1"/>', fr: [Object.assign({}, STAND, { f: [61, 55] }), { h: [61, 1], n: [60, 7], p: [60, 25], k: [60, 39], e: [60, 16], w: [60, 24], f: [62, 52] }] }
+};
+function poseSvg(name, cls = '') {
+  const P = POSES[name]; if (!P) return '';
+  const fr = P.fr.map(f => Object.assign({}, P.fr[0], f)), dur = (P.dur || 2.4) + 's';
+  const loop = fr.length > 1 ? fr.concat([fr[0]]) : fr;
+  const an = (attr, vals) => fr.length > 1 ? `<animate attributeName="${attr}" values="${vals.join(';')}" dur="${dur}" repeatCount="indefinite" calcMode="spline" keySplines="${vals.slice(1).map(() => '.45 0 .55 1').join(';')}"/>` : '';
+  const line = (a, b) => fr[0][a] && fr[0][b] ? `<line x1="${fr[0][a][0]}" y1="${fr[0][a][1]}" x2="${fr[0][b][0]}" y2="${fr[0][b][1]}">${an('x1', loop.map(f => f[a][0]))}${an('y1', loop.map(f => f[a][1]))}${an('x2', loop.map(f => f[b][0]))}${an('y2', loop.map(f => f[b][1]))}</line>` : '';
+  const legs2 = fr[0].k2 ? `<g class="far">${line('p', 'k2')}${line('k2', 'f2')}</g>` : '';
+  const cable = P.cable ? `<line class="cab" x1="${fr[0].w[0]}" y1="${fr[0].w[1]}" x2="63" y2="56">${an('x1', loop.map(f => f.w[0]))}${an('y1', loop.map(f => f.w[1]))}</line>` : '';
+  return `<svg class="pose ${cls}" viewBox="0 -4 120 66" aria-hidden="true"><line class="gnd" x1="2" y1="58.5" x2="118" y2="58.5"/><g class="prop">${P.props || ''}</g>${cable}${legs2}${line('n', 'p')}${line('p', 'k')}${line('k', 'f')}${line('n', 'e')}${line('e', 'w')}<circle r="4.6" cx="${fr[0].h[0]}" cy="${fr[0].h[1]}">${an('cx', loop.map(f => f.h[0]))}${an('cy', loop.map(f => f.h[1]))}</circle></svg>`;
+}
+self.__sp = { poseSvg: (...a) => poseSvg(...a), POSES };
+self.__app = { get state() { return state; }, save: () => save(), syncAll: () => syncAll(), pull: f => pull(f), foStop: f => foStop(f) };
+const demoUrl = e => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(e.q || e.name);
+const GEAR = { planche: 'planche', 'câbles': 'câbles', chaise: 'chaise', table: 'table', corps: 'poids du corps' };
+// one exercise, explained: the movement, your level, all the steps up, the demo
+function exSheet(id, back) {
+  const e = L.SPORT.workouts.flatMap(w => w.ex).find(x => x.id === id); if (!e) return;
+  const lv = L.sportLevel(state, e.id), h = exHistory(e.id).slice(-8);
+  openSheet(e.name, `<div class="ex-fig">${poseSvg(e.pose, 'big')}</div>
+    <p style="margin:0 0 6px"><b>${esc(e.levels[lv.lvl][0])}</b> · ${esc(e.levels[lv.lvl][1])}</p>
+    ${e.cue ? `<p class="ex-cue">💡 ${esc(e.cue)}</p>` : ''}
+    <div class="ex-meta"><span>${setsOf(e, sportLightWeek())} séries × ${lv.target}${e.time ? ' s' : ' reps'}${e.side ? ' par côté' : ''}</span><span>repos ${e.rest} s entre les séries</span><span>${GEAR[e.gear] || ''}</span></div>
+    <a class="btn ex-demo" href="${demoUrl(e)}" target="_blank" rel="noopener">▶ Voir des vidéos de démo</a>
+    <div class="sec-t" style="margin-top:14px">Les étapes</div>
+    <div class="group">${e.levels.map((l, i) => `<div class="st-row${i < lv.lvl ? ' ok' : ''}"><span class="st-n">${i < lv.lvl ? '✓' : i + 1}</span><span class="bd"><span class="ti">${esc(l[0])}${i === lv.lvl ? ' · <b style="color:var(--accent)">toi</b>' : ''}</span><span class="su">${esc(l[1])}</span></span></div>`).join('')}</div>
+    ${h.length >= 2 ? `<div class="sec-t" style="margin-top:14px">Tes dernières séances</div><div class="group" style="padding:10px 14px">${spark(h.map(x => x.reps.reduce((a, b) => a + b, 0) / x.reps.length))}</div>` : ''}
+    ${back && back.w ? `<div class="sh-actions"><button type="button" class="btn" data-act="sportSheet" data-w="${esc(back.w)}" data-id="${esc(back.id || '')}">‹ Retour à la séance</button></div>` : ''}`);
+}
 const setsOf = (e, light) => light ? Math.max(2, e.sets - 1) : e.sets;
-const exLine = e => { const lv = L.sportLevel(state, e.id); return `${setsOf(e, sportLightWeek())} × ${lv.target}${e.time ? ' s' : ''}${e.side ? ' (par côté)' : ''} · ${e.levels[lv.lvl][0]}`; };
+const exLine = e => { const lv = L.sportLevel(state, e.id); return `${setsOf(e, sportLightWeek())} × ${lv.target}${e.time ? ' s' : ''}${e.side ? ' (par côté)' : ''} · ${e.levels[lv.lvl][0]} · repos ${e.rest} s`; };
 function sportSheet(key, id) {
   const wi = sportWorkoutOf(key, id), w = SP.workouts[wi];
   const others = SP.workouts.map((x, i) => i === wi ? '' : `<button type="button" class="btn" data-act="sportPick" data-v="${i}" data-w="${key}" data-id="${esc(id)}">${esc(x.name)}</button>`).join('');
   openSheet('Sport · ' + w.name, `<p class="hint" style="margin:-4px 0 12px;padding:0">${esc(w.focus)} · ~45 min avec l’échauffement. Les objectifs montent tout seuls d’une séance à l’autre selon ce que tu fais.</p>
-    <div class="group">${w.ex.map((e, i) => `<div class="st-row"><span class="st-n">${i + 1}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${esc(exLine(e))}</span></span></div>`).join('')}</div>
+    <div class="group">${w.ex.map((e, i) => `<button type="button" class="st-row ex-row" data-act="spEx" data-v="${e.id}" data-w="${key}" data-id="${esc(id)}">${poseSvg(e.pose, 'mini')}<span class="bd"><span class="ti">${i + 1}. ${esc(e.name)}</span><span class="su">${esc(exLine(e))}</span></span><span class="chev">›</span></button>`).join('')}</div>
+    <p class="hint" style="margin:6px 0 0">Touche un exercice pour voir le mouvement, tes étapes et des vidéos.</p>
     <p class="hint" style="margin:10px 0 0">Autre séance aujourd’hui ?</p><div class="btns" style="padding:6px 0 0">${others}</div>
     <div class="sh-actions"><button type="button" class="btn pri" data-act="sportGo" data-v="${wi}" data-w="${key}" data-id="${esc(id)}">Commencer (échauffement 4 min)</button></div>`);
 }
@@ -1627,10 +1729,10 @@ function sportPaint() {
   }
   const lv = L.sportLevel(state, e.id), lvl = e.levels[lv.lvl];
   r.lv[e.id] = lv.lvl;
-  const head = `${prog}<div class="sp-k">${r.ex + 1}/${w.ex.length} · série ${r.set + 1}/${setsOf(e, r.light)}${r.light ? ' · semaine légère' : ''}</div><div class="sp-n">${esc(e.name)}</div><div class="sp-lv"><b>${esc(lvl[0])}</b> · ${esc(lvl[1])}</div>`;
+  const head = `${prog}<div class="sp-k">${r.ex + 1}/${w.ex.length} · série ${r.set + 1}/${setsOf(e, r.light)}${r.light ? ' · semaine légère' : ''}</div><div class="sp-n">${esc(e.name)}</div><button type="button" class="ex-fig" data-act="spHow" aria-label="Comment faire">${poseSvg(e.pose, r.how ? 'big' : 'run')}<span>${r.how ? 'Masquer' : 'Comment faire ?'}</span></button>${r.how ? `<div class="ex-cue">💡 ${esc(e.cue || lvl[1])}</div><a class="btn ex-demo" href="${demoUrl(e)}" target="_blank" rel="noopener">▶ Vidéos de démo</a>` : ''}<div class="sp-lv"><b>${esc(lvl[0])}</b> · ${esc(lvl[1])}</div>${e.cue && r.set === 0 && !r.how ? `<div class="ex-cue">💡 ${esc(e.cue)}</div>` : ''}`;
   if (r.step === 'rest') {
     const nx = w.ex[r.ex];
-    box.innerHTML = `${prog}<div class="sp-k">Repos</div><div class="sp-big num">${mmss(r.t)}</div><div class="sp-h">Ensuite : ${esc(nx.name)}, série ${r.set + 1}/${setsOf(nx, r.light)}</div>`;
+    box.innerHTML = `${prog}<div class="sp-k">Repos · ${r.restOf || nx.rest} s</div><div class="sp-big num">${mmss(r.t)}</div><div class="sp-h">Ensuite : ${esc(nx.name)}, série ${r.set + 1}/${setsOf(nx, r.light)}</div>${r.set === 0 ? poseSvg(nx.pose, 'run') : ''}`;
     act.innerHTML = `<button type="button" class="btn" data-act="spRest" data-v="15">+15 s</button><button type="button" class="btn pri" data-act="spRest" data-v="0">Je suis prêt</button>`;
     return;
   }
@@ -1649,9 +1751,10 @@ function sportLog(n) {
   const r = sportRun, w = SP.workouts[r.wi], e = w.ex[r.ex];
   (r.reps[e.id] = r.reps[e.id] || []).push(n);
   r.cur = null; r.step = 'set'; r.set++;
-  if (r.set >= setsOf(e, r.light)) { r.ex++; r.set = 0; }
+  if (r.set >= setsOf(e, r.light)) { r.ex++; r.set = 0; r.how = false; }
   if (r.ex >= w.ex.length) { sportFinish(); return; }
-  r.step = 'rest'; r.t = e.rest; sportPaint();
+  // between two exercises a bit more rest than between two sets; never under 30 s
+  r.restOf = Math.max(30, r.set === 0 ? e.rest + 15 : e.rest); r.step = 'rest'; r.t = r.restOf; sportPaint();
 }
 function sportFinish() {
   clearInterval(sportTimer); keepAwake(false);
@@ -1663,7 +1766,7 @@ function sportFinish() {
   if (r.id) dm[r.id] = { k: 'sport', m: Math.max(20, took), w: w.id };
   state.sportNext = (r.wi + 1) % SP.workouts.length;
   state.sportLog = (state.sportLog || []).concat([{ at: r.startedAt, w: w.id, reps: r.reps, lv: r.lv, min: took, light: r.light || undefined }]).slice(-150);
-  save(); renderAll(); endChange();
+  save(); syncSoon(); renderAll(); endChange();
   const box = $('#spBox'), act = $('#spAct');
   if (box) box.innerHTML = `<div class="sp-k">Séance terminée</div><div class="sp-n">Bien joué 💪</div><div class="sp-h">Tes objectifs pour la prochaine fois :</div><div class="group">${notes}</div>`;
   if (act) act.innerHTML = `<button type="button" class="btn pri" data-act="closeSheet">Fermer</button>`;
@@ -1686,6 +1789,8 @@ function sportAction(a, v, b) {
   const r = sportRun;
   switch (a) {
     case 'sportSheet': sportSheet(b.dataset.w, b.dataset.id); return true;
+    case 'spEx': exSheet(v, { w: b.dataset.w, id: b.dataset.id }); return true;
+    case 'spHow': if (r) { r.how = !r.how; sportPaint(); } return true;
     case 'sportPick': { const key = b.dataset.w, id = b.dataset.id; sportStart(+v, key, id); return true; }
     case 'sportGo': sportStart(+v, b.dataset.w, b.dataset.id); return true;
     case 'spResume': sportResume(); return true;
@@ -1866,7 +1971,7 @@ function syncSheet() {
 }
 async function linkWith(k) {
   lsSet(KEY_LS, k);
-  const got = await pull(true);
+  const got = await pull(true, true);
   renderSet();
   showCard(got ? 'Appareil relié' : 'Code enregistré', got ? 'Ton planning est maintenant le même ici et sur ton autre appareil.' : 'Aucune donnée trouvée pour ce code pour l’instant.');
 }
@@ -2117,8 +2222,15 @@ if (APP !== 'main') {
   syncAll();
   mdFetch(false);
 })();
+function flushNow() {
+  const k = syncKey(); if (!WORKER || !k || !unpushed()) return;
+  clearTimeout(syncTimer);
+  const body = JSON.stringify({ k, updated: localUpdated(), state });
+  try { fetch(WORKER + '/store', { method: 'POST', keepalive: body.length < 60000, headers: { 'Content-Type': 'application/json' }, body }).then(r => r.json()).then(r => { if (r && r.ok) lsSet(LS + '-pushed', k + ':' + localUpdated()); else if (r && r.newer) pull(true); }).catch(() => { }); } catch (e) { }
+}
+window.addEventListener('pagehide', flushNow);
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState !== 'visible') return;
+  if (document.visibilityState !== 'visible') { flushNow(); return; }
   if (foRun() || sportRun) keepAwake(true);
   await pull(false);
   rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000);

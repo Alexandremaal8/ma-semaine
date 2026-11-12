@@ -143,3 +143,11 @@ console.log('focus OK');
   assert.ok(!day.ev.some(e => e !== ex && e.end > e.start && e.start < ex.end && e.end > ex.start), 'nothing on top of the exam');
   console.log('exam day OK');
 }
+{
+  // the sport program: board + body weight, one cable exercise at most, every move illustrated, real rests
+  const all = L.SPORT.workouts.flatMap(w => w.ex);
+  assert.ok(all.filter(e => e.gear === 'câbles').length <= 1, 'cables minimized');
+  assert.ok(all.every(e => e.pose && e.q && e.rest >= 30), 'every exercise has a figure, a demo search and a real rest');
+  assert.ok(!all.some(e => e.levels.some(l => /pause/i.test(l[0]))), 'no "pause" variant that reads like a rest');
+  console.log('sport v2 OK');
+}
