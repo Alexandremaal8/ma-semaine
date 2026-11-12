@@ -109,3 +109,25 @@ console.log('exo OK');
   assert.equal(L.buildNotifications(S6, new Date(t0 + 11 * 6e4), 1).filter(x => x.tag === 'focus').length, 0);
 }
 console.log('focus OK');
+{
+  // where you are in a série: your pace on the exercises done predicts the rest
+  const S3 = L.normalize(L.defaultState()); S3.since = new Date(2026, 10, 9).getTime();
+  const w3 = L.mondayOf(new Date(2026, 10, 9)), k3 = L.iso(w3), now3 = new Date(2026, 10, 12, 13);
+  S3.done[k3] = { x1: { s: 'ana', t: 'Série 9', m: 60, d: 3, a: 600, serie: true } };
+  const r = L.serieReport(S3, w3, 'ana', 2, 4);
+  assert.ok(!r.done && r.rem >= 60 && r.rem <= 150, 'rest of the série from your pace: ' + r.rem);
+  let left = 0; for (const x of L.generate(S3, w3, now3)) for (const e of x.ev) if (e.subj === 'ana' && e.serie && e.state === 'todo') left += e.end - e.start;
+  assert.ok(Math.abs(left - r.rem - 30) <= 25, 'planner keeps what is left (+ correction): ' + left + ' vs ' + r.rem);
+  assert.ok(L.serieReport(S3, w3, 'ana', 4, 4).done && S3.serieDone[k3].ana, 'last exo → série finished');
+  // a done exercise session counts for the série (it used to put its time back)
+  const S4 = L.normalize(L.defaultState()); S4.since = new Date(2026, 10, 9).getTime();
+  const g4 = L.generate(S4, w3, new Date(2026, 10, 13, 16)), ex = g4[4].ev.find(e => e.exo !== undefined && e.subj === 'prog' && e.serie);
+  S4.done[k3] = { [ex.id]: { s: 'prog', t: ex.title, m: 105, d: 4, a: ex.start, serie: true, fx: true } };
+  let pl = 0; for (const x of L.generate(S4, w3, new Date(2026, 10, 13, 16))) for (const e of x.ev) if (e.subj === 'prog' && e.kind === 'study' && e.state === 'todo' && !e.fixed && !/retard/i.test(e.title)) pl += e.end - e.start;
+  assert.ok(pl <= 60, 'after the session only the end of the série + correction: ' + pl);
+  // a corrigé spotted before the exercise session never puts the correction before it
+  S4.done = {}; S4.corrSeen = { [k3]: { prog: '2026-11-10' } };
+  const cd = L.generate(S4, w3, new Date(2026, 10, 12, 8)).flatMap(x => x.ev.filter(e => e.subj === 'prog' && e.corr).map(() => x.d));
+  assert.ok(cd.length && Math.min(...cd) >= 5, 'correction after Friday: ' + cd);
+  console.log('serie progress OK');
+}

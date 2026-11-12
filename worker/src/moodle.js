@@ -95,7 +95,7 @@ export async function readApi(token) {
   // upcoming events (deadlines, quizzes) for the next 70 days
   let events = [], actionOk = false;
   try {
-    const ev = await ws(token, 'core_calendar_get_action_events_by_timesort', { timesortfrom: Math.floor(now - 86400), timesortto: Math.floor(now + 70 * 86400), limitnum: 50 });
+    const ev = await ws(token, 'core_calendar_get_action_events_by_timesort', { timesortfrom: Math.floor(now - 86400), timesortto: Math.floor(now + 150 * 86400), limitnum: 50 });
     events = (ev.events || []).map(e => ({ uid: 'api-' + e.id, title: strip(e.name).slice(0, 160), course: e.course ? e.course.fullname : '', courseId: e.course ? e.course.id : null, start: (e.timestart || e.timesort) * 1000, end: ((e.timestart || e.timesort) + (e.timeduration || 0)) * 1000, src: 'api', url: e.url || '', todo: true }));
     actionOk = true;
   } catch (e) { }

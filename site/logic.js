@@ -235,7 +235,7 @@ function normalize(s) {
   out.subjects.forEach(x => { if (x.serie == null) x.serie = 120; if (x.corr == null) x.corr = x.serie ? 30 : 0; });
   // keep about 5 months of week-by-week history: older weeks only make the app (and its sync) heavier
   const cutoff = iso(addDays(mondayOf(new Date()), -7 * 20));
-  for (const k of ['done', 'frozen', 'weekModes', 'autoModes', 'serieDone', 'rolled', 'asked', 'serieEst', 'serieAi'])
+  for (const k of ['done', 'frozen', 'weekModes', 'autoModes', 'serieDone', 'rolled', 'asked', 'serieEst', 'serieAi', 'serieProg', 'corrMan'])
     if (out[k] && typeof out[k] === 'object') for (const wk of Object.keys(out[k])) if (/^\d{4}-\d{2}-\d{2}$/.test(wk) && wk < cutoff) delete out[k][wk];
   out.v = 10;
   return out;
@@ -427,10 +427,47 @@ function corrAvail(S, weekStart, su) {
   const planned = addDays(weekStart, last + 2);
   // the correction was spotted on Moodle earlier than the usual 2 days
   const seen = ((S.corrSeen || {})[iso(weekStart)] || {})[su.id];
-  if (seen) { const d = fromIso(seen); if (d < planned) return d < weekStart ? weekStart : d; }
+  if (seen) { const d = fromIso(seen), floor = addDays(weekStart, last + 1); if (d < planned) return d < floor ? floor : d; }
   return planned;
 }
 const corrDeferred = (S, weekStart, su) => { const a = corrAvail(S, weekStart, su); return !!a && a >= addDays(weekStart, 7); };
+
+/* Where you are in a série. kDone = exercises finished out of n; per = minutes per exercise read in the PDF.
+ * Your real pace on the part done predicts the rest; the planner gets the new total so exactly `rem`
+ * minutes of série are still planned (exercise sessions ahead included). */
+function serieSpent(S, key, subj) {
+  let all = 0, serie = 0;
+  for (const v of Object.values((S.done || {})[key] || {})) {
+    if (!v || typeof v !== 'object' || v.s !== subj || !v.m || v.b || v.c || /retard/i.test(v.t || '')) continue;
+    if (v.serie) serie += v.m;
+    if (!v.fx || v.serie) all += v.m;
+  }
+  return { all, serie };
+}
+function serieReport(S, weekStart, subj, kDone, n, per) {
+  const su = subjOf(S, subj), key = iso(weekStart);
+  if (!su || !(n > 0)) return null;
+  n = Math.min(40, Math.round(n)); kDone = Math.max(0, Math.min(n, kDone));
+  S.serieProg = S.serieProg || {}; const P = S.serieProg[key] = S.serieProg[key] || {};
+  const base = (P[subj] && P[subj].base) || serieMinOf(S, key, su) || 120;
+  const w = Array.isArray(per) && per.length === n && per.every(x => x > 0) ? per : Array(n).fill(1);
+  const tot = w.reduce((a, b) => a + b, 0), frac = w.slice(0, kDone).reduce((a, b) => a + b, 0) / tot;
+  const sp = serieSpent(S, key, subj);
+  P[subj] = { k: kDone, n, at: Date.now(), base, m: sp.serie };
+  if (kDone >= n) {
+    S.serieDone = S.serieDone || {}; (S.serieDone[key] = S.serieDone[key] || {})[subj] = 1;
+    if (sp.serie >= 30) { S.serieLog = S.serieLog || {}; const lg = (S.serieLog[subj] || []).filter(x => x.wk !== key); lg.push({ wk: key, m: sp.serie }); S.serieLog[subj] = lg.slice(-6); }
+    return { done: true, rem: 0, total: sp.serie, frac: 1, spent: sp.serie };
+  }
+  if (S.serieDone && S.serieDone[key]) delete S.serieDone[key][subj];
+  // estimate of what is left: the usual one, then more and more your measured pace
+  const remEst = base * (1 - frac);
+  const remPace = frac >= .08 && sp.serie >= 15 ? sp.serie * (1 - frac) / frac : remEst;
+  const a = frac >= .08 && sp.serie >= 15 ? Math.min(.85, .35 + frac) : 0;
+  const rem = Math.max(15, Math.round((remPace * a + remEst * (1 - a)) / 5) * 5);
+  S.serieEst = S.serieEst || {}; (S.serieEst[key] = S.serieEst[key] || {})[subj] = Math.max(15, Math.min(600, rem + sp.all));
+  return { done: false, rem, total: sp.serie + rem, frac, spent: sp.serie, pace: kDone ? sp.serie / kDone : null };
+}
 
 /* Backlog ("Retard"): items you add, plus unfinished séries added automatically at the end of each week.
  * An item stays until you tick it; the minutes of blocks done for it count as progress. */
@@ -726,7 +763,7 @@ function generate(S0, weekStart, now) {
   const serieMin = {}; for (const v of Object.values(doneMap)) if (v && typeof v === 'object' && v.serie && !v.c && !v.b && v.s) serieMin[v.s] = (serieMin[v.s] || 0) + (v.m || 0);
   for (const su of S.subjects) {
     const exoDone = Object.values(doneMap).filter(v => v && typeof v === 'object' && v.fx && v.serie && v.s === su.id).reduce((a, v) => a + (v.m || 0), 0);
-    const dn = (doneBy[su.id] || 0) - exoDone - (((S.serieDone || {})[key] || {})[su.id] ? Math.max(0, (serieMin[su.id] || 0) - exoDone) : 0);
+    const dn = (doneBy[su.id] || 0) - (((S.serieDone || {})[key] || {})[su.id] ? Math.max(0, (serieMin[su.id] || 0) - exoDone) : 0);
     const mu = must[su.id] || 0;
     mustLeft[su.id] = Math.max(0, mu - dn);
     corrLeft[su.id] = Math.min(corr[su.id] || 0, mustLeft[su.id]);
@@ -1201,6 +1238,6 @@ function sportProgress(S, id, done) {
   return { lvl, target, note, up: lvl > cur.lvl || target > cur.target };
 }
 
-const API = { inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { serieReport, serieSpent, inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

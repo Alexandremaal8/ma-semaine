@@ -578,7 +578,7 @@ function renderToday() {
     if (isDone) cls.push('done');
     const tags = (e.part ? `<span class="tag cu">fait à ${Math.round(e.part * 100)} %</span>` : '') + (e.state === 'missed' ? '<span class="tag">pas fait · replacé</span>' : '') + (e.late && !e.bl && e.state !== 'done' ? '<span class="tag">semaine passée</span>' : '') + (e.catchup && e.state !== 'done' ? '<span class="tag cu">rattrapage</span>' : '');
     rows.push(`<div class="${cls.join(' ')}"${su ? ` style="--c:${esc(su.color)}"` : ''}><span class="tm">${fmt(e.start)}<small>${fmt(e.end)}</small></span>
-      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${(e.kind === 'course' || e.cid) && !e.room && e.cid ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key, sel, day.ev)}${mdBlockLinks(e, key)}${foBtn(e, key, sel)}</div>
+      <div class="card"><div class="bd"${e.state === 'missed' && e.kind === 'study' ? ` data-act="checkin" data-w="${key}" data-v="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'stretch' ? ` data-act="stretchSheet" data-v="${dow(sel)}" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}${e.kind === 'sport' ? ` data-act="sportSheet" data-w="${key}" data-id="${e.id}" role="button" tabindex="0"` : ''}><div class="ti">${esc(e.title)}${e.kind === 'sport' && spPlan[e.id] != null && spPlan[e.id] >= 0 ? ' · ' + esc(SP.workouts[spPlan[e.id]].name) : ''}${tags}</div>${e.sub || e.kind === 'sport' ? `<div class="su">${esc(e.sub || '')}${e.kind === 'stretch' ? ' · touche pour les exercices' : ''}${e.kind === 'sport' ? (e.sub ? ' · ' : '') + (isDone ? 'séance faite' : 'touche pour la séance guidée') : ''}</div>` : ''}${(e.kind === 'course' || e.cid) && !e.room && e.cid ? `<div class="md-links">${roomBtn(e, true)}</div>` : ''}${revLine(e, key, sel, day.ev)}${mdBlockLinks(e, key)}${serieProgLine(e, key)}${foBtn(e, key, sel)}</div>
       ${can ? `<button type="button" class="chk" data-act="done" data-w="${key}" data-v="${e.id}" aria-pressed="${isDone}" aria-label="Fait : ${esc(e.title)}">${CHECK}</button>` : ''}</div></div>`);
   }
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
@@ -834,7 +834,7 @@ function mdEstimates() {
     const wk = iso(ws); if (!L.coursesOnFor(state, ws)) continue;
     const n = L.semWeek(state, ws);
     for (const su of state.subjects) {
-      if (!su.serie || ((state.serieDone || {})[wk] || {})[su.id]) continue;
+      if (!su.serie || ((state.serieDone || {})[wk] || {})[su.id] || ((state.serieProg || {})[wk] || {})[su.id]) continue;
       const it = mdFiles(su.id).find(i => i.kind === 'serie' && i.num === n && i.est && i.est.minutes > 0); if (!it) continue;
       state.serieAi = state.serieAi || {}; (state.serieAi[wk] = state.serieAi[wk] || {})[su.id] = it.est.minutes;
       const mine = Math.max(45, Math.min(360, Math.round(it.est.minutes * serieRatio(su.id) / 5) * 5));
@@ -850,10 +850,20 @@ function mdApply() {
   if (!moodle || !moodle.ok || !moodle.ok.api) return;
   { const before = JSON.stringify(state.serieEst || {}); beginChange(); const ch = mdEstimates(); if (ch.length && JSON.stringify(state.serieEst || {}) !== before) { save(); renderAll(); endChange('Séries lues sur Moodle', 'Durées estimées d’après les PDF : ' + ch.join(', ') + '. Ton planning est recalé.'); } }
   const done = []; state.corrSeen = state.corrSeen || {};
+  // an earlier version took last week's corrigé for this week's: undo those (not the ones you set yourself)
+  for (const [wk, m] of Object.entries(state.corrSeen)) for (const subj of Object.keys(m || {})) {
+    if (((state.corrMan || {})[wk] || {})[subj]) continue;
+    const n = L.semWeek(state, fromIso(wk));
+    if (!(moodle.items || []).some(i => i.kind === 'correction' && i.num === n && mdCourseSubj(i.course) === subj)) { delete m[subj]; done.fix = true; }
+  }
+  if (done.fix) { save(); renderAll(); }
   for (const i of moodle.items || []) {
     if (i.kind !== 'correction' || i.time < Date.now() - 10 * 864e5) continue;
     const subj = mdCourseSubj(i.course), su = subj && subjOf(state, subj); if (!su) continue;
-    const d = new Date(i.time), ws = mondayOf(d), wk = iso(ws), di = iso(d);
+    const d = new Date(i.time), di = iso(d);
+    if (!i.num) continue;
+    const ws = [mondayOf(d), addDays(mondayOf(d), -7)].find(w => L.semWeek(state, w) === i.num); if (!ws) continue;
+    const wk = iso(ws);
     const av = L.corrAvail(state, ws, su); if (!av || av <= fromIso(di)) continue;
     const m = state.corrSeen[wk] = state.corrSeen[wk] || {}; if (m[subj]) continue;
     if (!done.length) beginChange();
@@ -1258,7 +1268,7 @@ function foStart(opt) {
 }
 function foPause() { const r = foRun(); if (!r) return; if (r.pauseAt) { r.paused += Date.now() - r.pauseAt; r.pauseAt = null; } else r.pauseAt = Date.now(); save(); foPaint(); }
 // end: finished → the block is ticked with the real time; not finished → ticked at the share done, the rest gets replanned
-function foStop(finished) {
+function foStop(finished, after) {
   const r = foRun(); if (!r) return;
   const ms = foElapsed(r), min = Math.max(1, Math.round(ms / 6e4));
   beginChange();
@@ -1279,7 +1289,8 @@ function foStop(finished) {
       d['f-' + r.start] = { s: r.subj, t: r.title, m: min, d: dow(st), a: Math.floor(sm / 5) * 5, free: true, focus: true };
     }
   }
-  save(); renderAll(); endChange(min >= 3 ? 'Focus enregistré' : 'Focus arrêté', min >= 3 ? `${esc(r.title)} · ${hm(min)} de vrai travail${r.plan ? ' (prévu ' + hm(r.plan) + ')' : ''}. Ton planning tient compte du temps réel.` : 'Moins de 3 min : rien d’enregistré.');
+  const more = after && min >= 3 ? after(r, min) : '';
+  save(); renderAll(); endChange(min >= 3 ? 'Focus enregistré' : 'Focus arrêté', min >= 3 ? `${esc(r.title)} · ${hm(min)} de vrai travail${r.plan ? ' (prévu ' + hm(r.plan) + ')' : ''}. ` + (more || 'Ton planning tient compte du temps réel.') : 'Moins de 3 min : rien d’enregistré.');
   foPaint(); renderFocusBar();
 }
 function foCancel() { const r = foRun(); if (!r) return; FO().run = null; keepAwake(false); save(); foPaint(); renderFocusBar(); toast('Focus annulé, rien d’enregistré'); }
@@ -1342,8 +1353,52 @@ function foEndSheet() {
   const r = foRun(); if (!r) return;
   const min = Math.round(foElapsed(r) / 6e4);
   if (!r.id) { foStop(true); return; }
+  const fb = r.wk ? findBlock(r.wk, r.id) : null, sc = fb && min >= 3 ? serieCtx(fb.e, r.wk) : null;
+  if (sc) { serieSheet(sc, { r, min }); return; }
   openSheet('Fin du focus', `<p style="margin:0 0 14px;color:var(--muted)">${esc(r.title)} · ${hm(Math.max(1, min))} de travail${r.plan ? ' sur ' + hm(r.plan) + ' prévues' : ''}.</p>
     <div class="btns" style="flex-direction:column;align-items:stretch;padding:0"><button type="button" class="btn pri" data-act="foStop" data-v="1">Bloc fini ✓</button><button type="button" class="btn" data-act="foStop" data-v="0">Pas fini · replanifie le reste</button></div>`);
+}
+// ——— where you are in the série: asked when a série focus ends, or from the block ———
+function serieCtx(e, wk) {
+  if (!e || !e.subj || !e.serie || e.corr || e.bl || /retard/i.test(e.title || '') || !wk) return null;
+  const num = L.semWeek(state, fromIso(wk));
+  const f = mdApi() ? mdPick(e.subj, 'serie', num, wk) : null, es = f && f.est && f.est.n > 0 ? f.est : null;
+  const pr = ((state.serieProg || {})[wk] || {})[e.subj];
+  let lastN = 0; for (const k of Object.keys(state.serieProg || {}).sort().reverse()) { const p = state.serieProg[k][e.subj]; if (p && p.n) { lastN = p.n; break; } }
+  return { subj: e.subj, wk, num, n: es ? es.n : pr ? pr.n : 0, guess: lastN || 6, per: es && Array.isArray(es.per) ? es.per : null, pr, hard: es && es.hard || [] };
+}
+function serieSheet(sc, fo) {
+  const su = subjOf(state, sc.subj), at = sc.pr ? sc.pr.k + 1 : 1;
+  const head = fo ? `${esc(fo.r.title)} · ${hm(Math.max(1, fo.min))} de travail${fo.r.plan ? ' sur ' + hm(fo.r.plan) + ' prévues' : ''}.` : `${esc(su ? su.name : '')} · série ${sc.num || ''}`;
+  const chips = sc.n ? `<div class="exo-grid">${Array.from({ length: sc.n }, (_, i) => `<button type="submit" class="exo${i + 1 === at ? ' cur' : ''}${i + 1 < at ? ' past' : ''}${sc.hard.includes(i + 1) ? ' hard' : ''}" value="${i}">${i + 1}</button>`).join('')}</div>
+      <button type="submit" class="btn pri" value="${sc.n}" style="width:100%;margin-top:10px">Série finie ✓</button>`
+    : `<div class="fields">${F.num('n', 'Combien d’exos dans la série ?', sc.guess, 'min="1" max="40"')}${F.num('k', 'Tu reprends à l’exo', at, 'min="1" max="40"')}</div>
+      <div class="sh-actions"><button type="submit" class="btn" value="all">Série finie ✓</button><button type="submit" class="btn pri" value="go">Enregistrer</button></div>`;
+  openSheet(fo ? 'Fin du focus' : 'Où tu en es', `<p style="margin:0 0 12px;color:var(--muted)">${head}</p>
+    <div class="exo-q">Tu es arrivé à quel exo ?</div><p class="hint" style="margin:2px 0 12px;padding:0">Touche celui où tu reprendras la prochaine fois. L’app mesure ta vitesse et recale le reste de la série.${sc.hard.length ? ' <span style="color:#E11D48">●</span> = exo le plus dur.' : ''}</p>
+    ${chips}
+    <button type="submit" class="linkbtn mini" value="skip" style="margin:14px auto 0;display:block">${fo ? 'Passer · juste enregistrer le temps' : 'Annuler'}</button>`, (fd, btn) => {
+    const v = btn ? btn.value : 'skip';
+    if (v === 'skip') { if (fo) setTimeout(() => foStop(fo.min >= (fo.r.plan || 0) * .8), 250); return true; }
+    let n = sc.n, k;
+    if (n) k = +v; else { n = Math.max(1, Math.min(40, Math.round(+fd.n || 0))); if (!n) { toast('Indique le nombre d’exos'); return false; } k = v === 'all' ? n : Math.max(0, Math.min(n, Math.round(+fd.k || 1) - 1)); }
+    const apply = () => {
+      const res = L.serieReport(state, fromIso(sc.wk), sc.subj, k, n, sc.per);
+      if (!res) return '';
+      if (res.done) return `Série ${sc.num || ''} finie en ${hm(Math.round(res.spent))} 🎉 Il reste la correction.`;
+      return `Exo ${k + 1} sur ${n}${res.pace ? ' · ton rythme ≈ ' + hm(Math.round(res.pace)) + ' par exo' : ''} · il reste ≈ ${hm(res.rem)} pour finir, ton planning est recalé.`;
+    };
+    if (fo) { setTimeout(() => foStop(k >= n || fo.min >= (fo.r.plan || 0) * .8, apply), 250); return true; }
+    const msg = apply(); save(); renderAll(); endChange('Série mise à jour', msg); return true;
+  });
+  if (fo || sc.n) { const f = $('#shBody .sh-actions'); if (f && sc.n) f.remove(); }
+}
+// the line under a série block: where you are and what is left
+function serieProgLine(e, wk) {
+  const sc = e.kind === 'study' && e.state !== 'done' ? serieCtx(e, wk) : null; if (!sc) return '';
+  const p = sc.pr;
+  const left = p ? Math.max(0, L.serieMinOf(state, wk, subjOf(state, sc.subj)) - L.serieSpent(state, wk, sc.subj).all) : 0;
+  return `<div class="md-links"><button type="button" class="linkbtn mini" data-act="foSerie" data-w="${esc(wk)}" data-v="${esc(e.id)}">${p ? `Exo ${Math.min(p.k + 1, p.n)}/${p.n} · reste ≈ ${hm(Math.max(15, Math.round(left / 5) * 5))}` : 'Où j’en suis'}</button></div>`;
 }
 function foFreeSheet() {
   openSheet('Focus libre', `<div class="fields">${F.select('subj', 'Matière', subjOpts(), (state.subjects[0] || {}).id)}${F.text('title', 'Sur quoi ?', '', 'full', 'ex. Fiche résumé, exos en plus…')}${F.select('plan', 'Durée visée', [[0, 'Pas de limite'], [25, '25 min'], [50, '50 min'], [90, '1h30']], 50)}</div><div class="sh-actions"><button type="submit" class="btn pri">Lancer</button></div>`, fd => {
@@ -1397,6 +1452,7 @@ function focusAction(a, v, b) {
     }
     case 'foPause': foPause(); return true;
     case 'foEnd': foEndSheet(); return true;
+    case 'foSerie': { const fb = findBlock(b.dataset.w, v), sc = fb && serieCtx(fb.e, b.dataset.w); if (sc) serieSheet(sc, null); return true; }
     case 'foStop': closeSheet(); setTimeout(() => foStop(v === '1'), 250); return true;
     case 'foCancel': foCancel(); return true;
     case 'foFree': foFreeSheet(); return true;
@@ -1885,7 +1941,7 @@ document.addEventListener('click', async e => {
     case 'roomAdd': roomSheet(v); return;
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'exDocs': exDocsSheet(v, b.dataset.w); return;
-    case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); done(); return; }
+    case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); state.corrMan = state.corrMan || {}; (state.corrMan[wk] = state.corrMan[wk] || {})[v] = 1; done(); return; }
     case 'closeSheet': closeSheet(); return;
     case 'pick': selDate = v; renderToday(); return;
     case 'wk': selDate = iso(addDays(fromIso(selDate), +v)); renderToday(); return;
