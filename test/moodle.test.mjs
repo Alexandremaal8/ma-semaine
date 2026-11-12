@@ -93,6 +93,19 @@ console.log('moodle OK');
   const scan = await estimateSerie({ AI: { toMarkdown: async () => [{ format: 'markdown', data: ' ' }], run: async () => ({}) } }, 'tk', { file: 'https://moodle.epfl.ch/webservice/pluginfile.php/1/s.pdf', title: 'x' });
   assert.ok(scan.err);
   assert.equal(await estimateSerie({}, 'tk', { file: 'x' }), null);   // no AI: nothing
+  // a heavy sheet compared with the previous ones of the course gets a heads-up
+  const { studySeries } = await import('../worker/src/moodle.js');
+  const kv = new Map([['mcfg:k1', JSON.stringify({ token: 'tk' })], ['mdig:k1', JSON.stringify({ courses: [{ id: 5, short: 'MATH-101', name: 'Analyse I' }], items: [
+    { course: 5, kind: 'serie', num: 7, file: 'https://moodle.epfl.ch/webservice/pluginfile.php/1/a.pdf', time: Date.now() - 20 * 864e5, est: { minutes: 120 } },
+    { course: 5, kind: 'serie', num: 8, file: 'https://moodle.epfl.ch/webservice/pluginfile.php/1/b.pdf', time: Date.now() - 13 * 864e5, est: { minutes: 130 } },
+    { course: 5, kind: 'serie', num: 9, title: 'Série 9', nice: 'Série 9', file: 'https://moodle.epfl.ch/webservice/pluginfile.php/1/c.pdf', mime: 'application/pdf', time: Date.now() - 864e5 }] })]]);
+  const env2 = { KV: { get: async (k, t) => kv.has(k) ? (t === 'json' ? JSON.parse(kv.get(k)) : kv.get(k)) : null, put: async (k, v) => kv.set(k, v) },
+    AI: { toMarkdown: env.AI.toMarkdown, run: async () => ({ response: '{"exercises":4,"minutes":230,"per":[30,40,60,60],"topics":["Intégrales"],"hard":[3,9],"level":"heavy","tip":"Commence par l’exo 3."}' }) } };
+  const r2 = await studySeries(env2, 'k1', 2);
+  assert.equal(r2.n, 1); assert.equal(r2.heads.length, 1);
+  assert.ok(/costaude/.test(r2.heads[0].title) && /exo 3 plus durs/.test(r2.heads[0].body) && /d’habitude/.test(r2.heads[0].body), r2.heads[0].body);
+  const saved = JSON.parse(kv.get('mdig:k1')).items[2].est;
+  assert.ok(saved.per.reduce((a, b) => a + b, 0) >= 225 && saved.hard.length === 1 && saved.level === 'heavy', 'per rescaled, impossible exo numbers dropped');
   globalThis.fetch = realFetch;
   console.log('moodle study OK');
 }

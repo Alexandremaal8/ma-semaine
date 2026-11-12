@@ -967,7 +967,7 @@ function mdBlockLinks(e, wk) {
   if (!mdApi() || !e.subj) return '';
   const out = [], n = +((/(\d{1,2})/.exec(e.title) || [])[1] || 0);
   let estLine = '';
-  if (e.serie && !e.corr) { const f0 = mdPick(e.subj, 'serie', n, wk); const es = f0 && f0.est; if (es && es.minutes) estLine = `<div class="su rev">${es.n} exercice${es.n > 1 ? 's' : ''} · ≈ ${hm(Math.max(45, Math.min(360, Math.round(es.minutes * serieRatio(e.subj) / 5) * 5)))} pour toi${es.hard && es.hard.length ? ' · plus dur : exo ' + es.hard.join(', ') : ''}${es.topics && es.topics.length ? '<br>' + esc(es.topics.join(' · ')) : ''}</div>`; }
+  if (e.serie && !e.corr) { const f0 = mdPick(e.subj, 'serie', n, wk); const es = f0 && f0.est; if (es && es.minutes) estLine = `<div class="su rev">${es.n} exercice${es.n > 1 ? 's' : ''} · ≈ ${hm(Math.max(45, Math.min(360, Math.round(es.minutes * serieRatio(e.subj) / 5) * 5)))} pour toi${es.hard && es.hard.length ? ' · plus dur : exo ' + es.hard.join(', ') : ''}${es.topics && es.topics.length ? '<br>' + esc(es.topics.join(' · ')) : ''}${es.level === 'heavy' ? '<br><b style="color:#C2410C">Série costaude</b>' : ''}${es.tip ? '<br>💡 ' + esc(es.tip) : ''}</div>`; }
   // backlog blocks like "Retard · Série 8": the série and its corrigé are one tap away
   if (e.bl && !e.serie && !e.corr) { const m = /s[ée]rie\s*(\d{1,2})/i.exec(e.title || ''); if (m) { const sf = mdPick(e.subj, 'serie', +m[1], null), cf = mdPick(e.subj, 'correction', +m[1], null); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Ouvrir la série ${+m[1]}</button>`); if (cf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(cf.file)}">Corrigé</button>`); if (sf || cf) return estLine + `<div class="md-links">${out.join('')}</div>`; } }
   const f = mdFileFor(e, wk); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
@@ -1426,6 +1426,17 @@ function foPaint() {
     <button type="button" class="linkbtn mini" data-act="foCancel" style="margin-top:12px">Annuler sans enregistrer</button></div>`;
   clearTimeout(focusTick); focusTick = setTimeout(() => { if (tab === 'focus' && document.visibilityState === 'visible') foPaint(); renderFocusBar(); }, 1000 - (Date.now() % 1000));
 }
+// a chrono left running for hours: count the planned time, keep going, or drop it
+function foStaleCheck() {
+  const r = foRun(); if (!r || r.pauseAt || $('#sheetBg').classList.contains('on')) return;
+  const min = foElapsed(r) / 6e4, plan = r.plan || 60;
+  if (min < Math.max(plan + 90, plan * 2, 150) || (r.staleOk && Date.now() < r.staleOk)) return;
+  openSheet('Chrono oublié ?', `<p style="margin:0 0 14px;color:var(--muted)">« ${esc(r.title)} » tourne depuis ${hm(Math.round(min))}${r.plan ? ', pour ' + hm(r.plan) + ' prévues' : ''}.</p>
+    <div class="btns" style="flex-direction:column;align-items:stretch;padding:0">
+      <button type="button" class="btn pri" data-act="foStale" data-v="plan">Compter ${hm(plan)} et arrêter</button>
+      <button type="button" class="btn" data-act="foStale" data-v="keep">J’y suis encore</button>
+      <button type="button" class="btn" data-act="foStale" data-v="drop">Annuler ce chrono</button></div>`);
+}
 function foEndSheet() {
   const r = foRun(); if (!r) return;
   const min = Math.round(foElapsed(r) / 6e4);
@@ -1529,6 +1540,11 @@ function focusAction(a, v, b) {
     }
     case 'foPause': foPause(); return true;
     case 'foEnd': foEndSheet(); return true;
+    case 'foStale': { const r = foRun(); if (!r) return true; closeSheet();
+      if (v === 'keep') { r.staleOk = Date.now() + 3600e3; save(); }
+      else if (v === 'drop') foCancel();
+      else { r.paused = (r.paused || 0) + Math.max(0, foElapsed(r) - (r.plan || 60) * 6e4); save(); setTimeout(foEndSheet, 300); }
+      return true; }
     case 'foSerie': { const fb = findBlock(b.dataset.w, v), sc = fb && serieCtx(fb.e, b.dataset.w); if (sc) serieSheet(sc, null); return true; }
     case 'foStop': closeSheet(); setTimeout(() => foStop(v === '1'), 250); return true;
     case 'foCancel': foCancel(); return true;
@@ -2236,6 +2252,7 @@ if (APP !== 'main') {
   rollover();
   setTimeout(autoCheck, 300);
   setTimeout(checkIn, 1200);
+  setTimeout(foStaleCheck, 1600);
   syncAll();
   mdFetch(false);
 })();
@@ -2250,7 +2267,7 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') { flushNow(); return; }
   if (foRun() || sportRun) keepAwake(true);
   await pull(false);
-  rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000);
+  rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000); setTimeout(foStaleCheck, 1400);
   if (tab === 'today') keepScroll(renderToday);
   syncAll();
   mdFetch(false);

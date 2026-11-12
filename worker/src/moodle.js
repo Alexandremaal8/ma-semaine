@@ -151,7 +151,15 @@ Rules:
 - deadline: something the student must do or hand in before a date (registration, quiz, form, project). Not the weekly exercise sets.
 - info: everything else.
 - Resolve relative dates ("ce jeudi", "next week", "tomorrow") from the posting date. Dates in the past are possible only for "info".
-- start/end in 24h format. If unsure about a field, use null. If unsure about the action, use "info".`;
+- start/end in 24h format. If unsure about a field, use null. If unsure about the action, use "info".
+- The summary is in French even if the announcement is in English, and says the practical consequence ("Pas de cours jeudi 3 déc.", "Examen blanc mardi 2 déc. 8h15, salle CE1"), not a paraphrase of the greeting.
+Examples (posted Monday 2026-11-23):
+"Les résultats de l'examen blanc sont disponibles, moyenne 3.9" → {"action":"info","date":null,"start":null,"end":null,"room":null,"session":null,"summary":"Résultats de l’examen blanc en ligne (moyenne 3.9)."}
+"The midterm will take place next Tuesday at 8:15 in CE1" → {"action":"add_mock","date":"2026-12-01","start":"08:15","end":null,"room":"CE1","session":null,"summary":"Examen blanc mardi 1er déc. à 8h15 en CE1."}
+"Pas de séance d'exercices ce jeudi (Dies academicus)" → {"action":"cancel_session","date":"2026-11-26","start":null,"end":null,"room":null,"session":"Exercices","summary":"Pas de séance d’exercices jeudi 26 nov."}
+"Le quiz 5 est ouvert jusqu'à dimanche 23h59" → {"action":"deadline","date":"2026-11-29","start":"23:59","end":null,"room":null,"session":null,"summary":"Quiz 5 à faire avant dimanche 29 nov. 23h59."}
+"Le cours de vendredi aura lieu exceptionnellement en CO2" → {"action":"room_change","date":"2026-11-27","start":null,"end":null,"room":"CO2","session":"Cours","summary":"Cours de vendredi 27 nov. en CO2."}
+"Les corrigés de la série 10 sont en ligne" → {"action":"info","date":null,"start":null,"end":null,"room":null,"session":null,"summary":"Corrigé de la série 10 disponible."}`;
 function cleanAi(o) {
   const A = ['add_mock', 'add_exam', 'cancel_session', 'room_change', 'deadline', 'info'];
   if (!o || !A.includes(o.action)) return null;
@@ -184,16 +192,19 @@ async function understand(env, dig, old) {
 
 /* ---------- reading the séries themselves (PDF → text → time estimate) ---------- */
 const STUDY_PROMPT = `You estimate homework workload for a first-year EPFL student (Analyse, Algèbre linéaire, Physique, AICC, Programmation).
-You get the text of one weekly exercise sheet ("série"). Answer with ONE JSON object only:
-{"exercises": number of exercises, "minutes": total minutes a serious first-year student needs to solve the whole sheet without looking at solutions (realistic, usually 90-300), "per": [minutes per exercise, in order], "topics": ["2 to 5 short topics in French"], "hard": [numbers of the 1-2 hardest exercises]}
-Count sub-questions as part of their exercise. Optional/bonus exercises (marked "facultatif", "bonus", "*", "optional") count at half time. If the text is not an exercise sheet, answer {"exercises":0}.`;
+You get the course and the text of one weekly exercise sheet ("série"). Answer with ONE JSON object only:
+{"exercises": number of exercises, "minutes": total minutes a serious first-year student needs to solve the whole sheet without looking at solutions (realistic, usually 90-300), "per": [minutes per exercise, in order], "topics": ["2 to 5 short topics in French"], "hard": [numbers of the 1-2 hardest exercises], "level": "light|normal|heavy" compared with a usual first-year sheet of this course, "tip": "one short French sentence of advice for this sheet, or null"}
+Count sub-questions as part of their exercise. Proofs, multi-step derivations and programming tasks take longer than direct computations. Optional/bonus exercises (marked "facultatif", "bonus", "*", "optional") count at half time. "per" must have exactly one entry per exercise and add up to "minutes". If the text is not an exercise sheet, answer {"exercises":0}.`;
 function cleanEst(o) {
   if (!o || !(o.exercises > 0) || !(o.minutes > 0)) return null;
   const n = Math.min(40, Math.round(o.exercises)), min = Math.max(30, Math.min(480, Math.round(o.minutes / 5) * 5));
   const per = Array.isArray(o.per) ? o.per.slice(0, 40).map(x => Math.max(0, Math.min(240, Math.round(+x || 0)))) : [];
-  return { n, minutes: min, per, topics: (Array.isArray(o.topics) ? o.topics : []).slice(0, 5).map(t => String(t).slice(0, 50)), hard: (Array.isArray(o.hard) ? o.hard : []).slice(0, 3).map(x => +x).filter(x => x > 0), at: Date.now() };
+  // per-exercise times that don't match the count are useless for the pace: rescale or drop them
+  let p2 = per.length === n && per.every(x => x > 0) ? per : [];
+  if (p2.length) { const sum = p2.reduce((a, b) => a + b, 0); if (Math.abs(sum - min) > min * .15) p2 = p2.map(x => Math.max(1, Math.round(x * min / sum))); }
+  return { n, minutes: min, per: p2, topics: (Array.isArray(o.topics) ? o.topics : []).slice(0, 5).map(t => String(t).slice(0, 50)), hard: (Array.isArray(o.hard) ? o.hard : []).slice(0, 3).map(x => +x).filter(x => x > 0 && x <= n), level: ['light', 'normal', 'heavy'].includes(o.level) ? o.level : 'normal', tip: o.tip && o.tip !== 'null' ? String(o.tip).slice(0, 140) : null, at: Date.now() };
 }
-export async function estimateSerie(env, token, item) {
+export async function estimateSerie(env, token, item, courseName) {
   if (!env.AI || typeof env.AI.toMarkdown !== 'function') return null;
   const r = await fetch(item.file + (item.file.includes('?') ? '&' : '?') + 'token=' + token, { headers: UA });
   if (!r.ok) return { err: 'HTTP ' + r.status, at: Date.now() };
@@ -202,18 +213,27 @@ export async function estimateSerie(env, token, item) {
   if (Array.isArray(md)) md = md[0];
   const text = md && md.format !== 'error' ? String(md.data || '') : '';
   if (text.trim().length < 80) return { err: 'PDF illisible (scanné ?)', at: Date.now() };
-  const out = await env.AI.run(AI_MODEL, { messages: [{ role: 'system', content: STUDY_PROMPT }, { role: 'user', content: 'Title: ' + item.title + '\n\n' + text.slice(0, 12000) }], max_tokens: 260, temperature: 0 });
+  const out = await env.AI.run(AI_MODEL, { messages: [{ role: 'system', content: STUDY_PROMPT }, { role: 'user', content: 'Course: ' + (courseName || '?') + '\nTitle: ' + item.title + '\n\n' + text.slice(0, 12000) }], max_tokens: 320, temperature: 0 });
   const txt = typeof out === 'string' ? out : out && (typeof out.response === 'string' ? out.response : out.response ? JSON.stringify(out.response) : '');
   const m = /\{[\s\S]*\}/.exec(txt || ''); if (!m) return { err: 'pas de réponse', at: Date.now() };
   try { return cleanEst(JSON.parse(m[0])) || { err: 'pas une série', at: Date.now() }; } catch (e) { return { err: 'réponse illisible', at: Date.now() }; }
 }
 export async function studySeries(env, k, max = 2) {
   const [cfg, dig] = await Promise.all([env.KV.get('mcfg:' + k, 'json'), env.KV.get('mdig:' + k, 'json')]);
-  if (!cfg || !cfg.token || !dig || !env.AI) return 0;
+  if (!cfg || !cfg.token || !dig || !env.AI) return { n: 0, heads: [] };
   const todo = (dig.items || []).filter(i => i.kind === 'serie' && i.file && /pdf/i.test((i.mime || '') + i.file) && !i.est && i.time > Date.now() - 35 * 864e5).sort((a, b) => b.time - a.time).slice(0, max);
-  for (const it of todo) { try { it.est = await estimateSerie(env, cfg.token, it) || { err: 'indisponible', at: Date.now() }; } catch (e) { it.est = { err: String(e.message || e).slice(0, 80), at: Date.now() }; } }
+  const heads = [];
+  for (const it of todo) {
+    const c = (dig.courses || []).find(x => x.id === it.course);
+    try { it.est = await estimateSerie(env, cfg.token, it, c ? c.name : '') || { err: 'indisponible', at: Date.now() }; } catch (e) { it.est = { err: String(e.message || e).slice(0, 80), at: Date.now() }; }
+    // a heavy sheet gets a heads-up: compared with the previous ones of the same course
+    const es = it.est; if (!es || !es.minutes) continue;
+    const prev = (dig.items || []).filter(x => x !== it && x.course === it.course && x.kind === 'serie' && x.est && x.est.minutes).map(x => x.est.minutes);
+    const avg = prev.length >= 2 ? prev.reduce((a, b) => a + b, 0) / prev.length : null;
+    if (es.level === 'heavy' || (avg && es.minutes >= avg * 1.3) || es.minutes >= 270) heads.push({ title: 'Série costaude · ' + (c ? c.short || c.name : ''), body: `${it.nice || it.title} : ≈ ${Math.floor(es.minutes / 60)}h${String(es.minutes % 60).padStart(2, '0')}${avg ? ' (d’habitude ≈ ' + Math.round(avg / 60 * 10) / 10 + ' h)' : ''}${es.hard && es.hard.length ? ', exo ' + es.hard.join(' et ') + ' plus durs' : ''}. ${es.tip || 'Commence tôt, l’app lui donne plus de temps.'}`.slice(0, 230), tag: 'serie-' + it.course + '-' + (it.num || '') });
+  }
   if (todo.length) await env.KV.put('mdig:' + k, JSON.stringify(dig));
-  return todo.length;
+  return { n: todo.length, heads };
 }
 
 const KEY_RE = /^[a-f0-9]{32,64}$/;
@@ -266,8 +286,8 @@ export async function moodleRoute(req, env, url, json) {
   if (url.pathname === '/moodle/study' && req.method === 'POST') {
     const data = await req.json().catch(() => ({})); const k = String(data.k || '');
     if (!KEY_RE.test(k)) return json({ error: 'bad key' }, 400);
-    const n = await studySeries(env, k, 2);
-    return json({ ok: true, read: n });
+    const r = await studySeries(env, k, 2);
+    return json({ ok: true, read: r.n });
   }
   if (url.pathname === '/moodle' && req.method === 'GET') {
     const k = url.searchParams.get('k') || '';

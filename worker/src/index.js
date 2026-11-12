@@ -190,7 +190,8 @@ async function moodleTick(env) {
       const ids = (await env.KV.get('links:' + k, 'json')) || [];
       for (const id of ids) {
         const rec = await env.KV.get('sub:' + id, 'json'); if (!rec) continue;
-        for (const n of fresh) { try { await sendPush(env, rec.subscription, { ...n, tag: 'moodle' }); } catch (e) { } }
+        // each its own tag: with one shared tag the phone kept only the last of them
+        for (const [i, n] of fresh.entries()) { try { await sendPush(env, rec.subscription, { ...n, tag: 'moodle-' + Date.now() + '-' + i }); } catch (e) { } }
       }
     } catch (e) { console.log('moodle', e && e.message); }
   }
@@ -201,6 +202,14 @@ export default {
   scheduled: (event, env, ctx) => {
     ctx.waitUntil(tick(env, event.scheduledTime));
     if (new Date(event.scheduledTime).getUTCMinutes() === 7) ctx.waitUntil(moodleTick(env));
-    if (new Date(event.scheduledTime).getUTCMinutes() === 37) ctx.waitUntil((async () => { for (const k of (await env.KV.get('mlist', 'json')) || []) { try { await studySeries(env, k, 2); } catch (e) { } } })());
+    if (new Date(event.scheduledTime).getUTCMinutes() === 37) ctx.waitUntil((async () => {
+      for (const k of (await env.KV.get('mlist', 'json')) || []) {
+        try {
+          const { heads } = await studySeries(env, k, 2);
+          if (!heads || !heads.length) continue;
+          for (const id of (await env.KV.get('links:' + k, 'json')) || []) { const rec = await env.KV.get('sub:' + id, 'json'); if (rec) for (const n of heads) { try { await sendPush(env, rec.subscription, n); } catch (e) { } } }
+        } catch (e) { }
+      }
+    })());
   }
 };

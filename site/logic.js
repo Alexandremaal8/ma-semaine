@@ -810,8 +810,9 @@ function generate(S0, weekStart, now) {
   // the chrono is the proof: a block whose time ends without a chrono counts as not done.
   // A chrono started late or running over: the blocks it runs into wait for it instead of counting as missed.
   const running = S.focus && S.focus.run && S.focus.run.start ? S.focus.run : null;
-  const underRun = s => running && s.endT > running.start && s.startT < nowT;
-  function realTimes(s, rec) { const st = rec.rs, ln = Math.max(5, Math.round(rec.m)); return { start: st, end: st + ln, startT: s.date.getTime() + st * 6e4, endT: s.date.getTime() + (st + ln) * 6e4, len: ln, real: true }; }
+  // (a chrono forgotten for hours stops holding the blocks after 4 h)
+  const underRun = s => running && s.endT > running.start && s.startT < nowT && s.startT < running.start + 4 * 3600e3;
+  function realTimes(s, rec) { const st = rec.rs, ln = Math.max(5, Math.min(1439 - st, Math.round(rec.m))); return { start: st, end: st + ln, startT: s.date.getTime() + st * 6e4, endT: s.date.getTime() + (st + ln) * 6e4, len: ln, real: true }; }
   for (const f of frozen) {
     const id = idOf(f.d, f), rec = doneMap[id];
     if (rec && typeof rec === 'object') live.push(Object.assign({}, f, rec.focus && rec.rs != null && rec.m ? realTimes(f, rec) : {}, { id, title: rec.t || f.title, subj: rec.s, state: 'done', part: rec.p }));
@@ -1261,9 +1262,12 @@ function sportProgress(S, id, done) {
   const cur = sportLevel(S, id); let { lvl, target, fails } = cur; let note = '';
   if (done.every(r => r >= target)) {
     fails = 0;
-    const next = Math.max(target + e.step, Math.min(...done));
+    let next = Math.max(target + e.step, Math.min(...done));
+    if (e.time) next = Math.ceil(next / 5) * 5;                    // holds in steps of 5 s
     if (next > e.max) {
-      if (lvl < e.levels.length - 1) { lvl++; target = e.min; note = 'niveau suivant : ' + e.levels[lvl][0]; }
+      // far too easy (every set ≥ 1.5× the top of the range): skip a variant
+      const jump = Math.min(...done) >= e.max * 1.5 && lvl < e.levels.length - 2 ? 2 : 1;
+      if (lvl < e.levels.length - 1) { lvl += jump; target = e.min; note = (jump > 1 ? 'beaucoup trop facile, on saute une étape : ' : 'niveau suivant : ') + e.levels[lvl][0]; }
       else { target = e.max; note = 'au max, garde ce rythme'; }
     } else { target = next; note = (e.time ? target + ' s' : target + ' reps') + ' la prochaine fois'; }
   } else if (done.reduce((a, r) => a + r, 0) / done.length < e.min) {

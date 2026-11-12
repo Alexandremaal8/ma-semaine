@@ -188,3 +188,12 @@ console.log('focus OK');
   assert.equal(new Set(tags).size, tags.length, 'one notification per block');
   console.log('january OK');
 }
+{
+  // sport: held times in steps of 5 s; a far too easy variant is skipped
+  const S = L.normalize(L.defaultState());
+  S.sportProg = { c5: { lvl: 1, target: 30, fails: 0 } };
+  assert.equal(L.sportProgress(S, 'c5', [33, 34, 36]).target % 5, 0, 'times in steps of 5');
+  S.sportProg.b1 = { lvl: 0, target: 15, fails: 0 };
+  assert.equal(L.sportProgress(S, 'b1', [40, 38, 36]).lvl, 2, 'far too easy: skip a variant');
+  console.log('final pass OK');
+}
