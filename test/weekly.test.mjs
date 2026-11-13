@@ -231,3 +231,16 @@ console.log('focus OK');
   assert.ok(L.generate(S, L.mondayOf(new Date(2026, 10, 13)), new Date(2026, 10, 13, 6))[4].ev.some(e => e.mock && e.kind === 'event'), 'online mock stays at home');
   console.log('mock day OK');
 }
+{
+  // exercise session skipped for a chrono on something else: it leaves the screen, its time goes back to the série
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 13)), wk = L.iso(ws);
+  const ex = L.generate(S, ws, new Date(2026, 10, 13, 6))[4].ev.find(e => e.fixed && e.serie && e.subj === 'alg');
+  S.done[wk] = { x9: { s: 'alg', t: 'Retard · Séries 6-7-8', m: 70, d: 4, a: ex.start, rs: ex.start + 5, focus: true, b: 'bl1' } };
+  const flex = g => g.flatMap(x => x.ev.filter(e => e.subj === 'alg' && e.serie && !e.fixed && e.state === 'todo')).reduce((a, e) => a + e.end - e.start, 0);
+  const before = flex(L.generate(S, ws, new Date(2026, 10, 13, 6)));
+  const g = L.generate(S, ws, new Date(2026, 10, 13, 11));
+  assert.ok(!g[4].ev.some(e => e.id === ex.id), 'skipped session not shown');
+  assert.ok(flex(g) >= before + (ex.end - ex.start) - 20, 'its série time is planned later');
+  console.log('skipped session OK');
+}

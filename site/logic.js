@@ -975,6 +975,12 @@ function generate(S0, weekStart, now) {
     const su = s.subj ? subjOf(S, s.subj) : null;
     x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part, underRun: s.underRun });
   }
+  // a fixed block (exercise session…) you skipped to work on something else with the chrono:
+  // the block you did takes its place on screen; its série time already went back to the blocks ahead
+  for (const x of days) {
+    const did = x.ev.filter(e => e.kind === 'study' && e.state === 'done' && !e.fixed);
+    x.ev = x.ev.filter(e => !(e.kind === 'study' && e.fixed && e.state === 'missed' && did.some(o => Math.min(o.end, e.end) - Math.max(o.start, e.start) >= (e.end - e.start) * .4)));
+  }
   // a marker after the last série block of each subject: the série should be finished by then
   if (S.coursesOn) for (const su of S.subjects) {
     if (!su.serie) continue;
