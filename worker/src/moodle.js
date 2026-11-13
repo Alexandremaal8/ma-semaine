@@ -81,7 +81,7 @@ export async function readApi(token) {
         const secNum = sectionNum(sec), secDay = sectionStart(sec);
         if (mod.visible === 0 || mod.uservisible === false) continue;
         const files = (mod.contents || []).filter(f => f.type === 'file' && f.fileurl).slice(0, 12);
-        const name = strip(mod.name), base = { course: c.id, section: strip(sec.name).slice(0, 80), url: (mod.url || '').slice(0, 300) };
+        const name = strip(mod.name), base = { course: c.id, section: strip(sec.name).slice(0, 80), url: (mod.url || '').slice(0, 300), sn: secNum ?? undefined, sd: secDay || undefined };
         if (!files.length) {
           const t = mod.added || 0; if (!t || t < now - 150 * 86400) continue;
           const k0 = kindOf(name), n0 = numOf(name) ?? (k0 === 'serie' || k0 === 'correction' ? secNum : null);

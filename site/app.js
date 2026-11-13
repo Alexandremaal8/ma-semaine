@@ -1156,16 +1156,27 @@ function stretchRun(d, wk, id) {
 
 /* ---------- Révisions d'examen blanc : quoi réviser dans chaque bloc ---------- */
 // the material to cover: Moodle sections (cours, séries, corrigés) when Moodle is linked, else the semester weeks so far
+// teaching week a Moodle item belongs to: its section ("Semaine 9", "Week 9", or dated "9 nov. - 15 nov.")
+function mdWeekOf(i) {
+  if (i.sn != null) return i.sn;
+  if (i.sd) return L.semWeek(state, mondayOf(fromIso(i.sd)));
+  const m = /(?:semaine|week|woche|s[ée]ance|cours|lecture|chapitre|chapter|w)\s*n?[°o.]?\s*0?(\d{1,2})(?!\d)/i.exec(i.section || '');
+  return m ? +m[1] : null;
+}
 function revTopics(subj, mockIso) {
   const md = fromIso(mockIso).getTime(), out = [];
-  const fs = mdFiles(subj).filter(i => i.time < md && i.kind !== 'exam');
+  // only what has been taught before the mock: teachers put the whole semester online in advance
+  const taught = L.semWeek(state, mondayOf(addDays(fromIso(mockIso), -1)));
+  let fs = mdFiles(subj).filter(i => i.time < md && i.kind !== 'exam');
+  const numbered = fs.filter(i => mdWeekOf(i) != null);
+  if (numbered.length && taught) fs = numbered.filter(i => mdWeekOf(i) <= taught);
   if (fs.length) {
     const sec = {};
-    for (const i of fs) { const k = i.section || 'Divers'; (sec[k] = sec[k] || { label: k, t: i.time, files: [] }); sec[k].t = Math.min(sec[k].t, i.time); sec[k].files.push(i.file); }
-    Object.values(sec).sort((a, b) => a.t - b.t).slice(-14).forEach(x => out.push({ label: x.label, files: x.files }));
+    for (const i of fs) { const w = mdWeekOf(i), k = w != null ? 'w' + w : (i.section || 'Divers'); (sec[k] = sec[k] || { label: w != null ? 'Semaine ' + w : k, w: w ?? 99, t: i.time, files: [] }); sec[k].t = Math.min(sec[k].t, i.time); if (i.file) sec[k].files.push(i.file); }
+    Object.values(sec).sort((a, b) => a.w - b.w || a.t - b.t).slice(-14).forEach(x => out.push({ label: x.label, files: x.files, w: x.w === 99 ? null : x.w }));
   } else {
     const n = Math.max(1, L.semWeek(state, mondayOf(fromIso(mockIso))) - 1);
-    for (let k = 1; k <= Math.min(n, 14); k++) out.push({ label: 'Semaine ' + k, sub: 'cours + série ' + k, files: [] });
+    for (let k = 1; k <= Math.min(n, 14); k++) out.push({ label: 'Semaine ' + k, sub: 'cours + série ' + k, files: [], w: k });
   }
   const ex = mdFiles(subj).filter(i => i.kind === 'exam');
   out.push({ label: 'Examen d’entraînement', sub: 'en conditions réelles, chrono', files: ex.map(i => i.file), last: true });
@@ -1188,22 +1199,30 @@ function revPlan(subj, mockIso) {
   for (const b of blocks) if (b.done && kept[b.id]) plan[b.id] = kept[b.id];
   // the practice exam gets the last block to itself when there are at least 2 blocks left
   const exI = topics.length - 1, lastAlone = todo.length >= 2 && left.includes(exI);
-  const spread = lastAlone ? todo.slice(0, -1) : todo, pool = lastAlone ? left.filter(i => i !== exI) : left;
+  // a whole practice exam needs time: in a short last block it becomes a couple of exam-style exercises
+  if (lastAlone && todo[todo.length - 1].len < 90) topics[exI] = Object.assign({}, topics[exI], { label: 'Exos type examen', sub: '2 exos d’anciens examens, chronométrés' });
+  const spread = lastAlone ? todo.slice(0, -1) : todo;
+  let pool = lastAlone ? left.filter(i => i !== exI) : left;
   if (lastAlone) plan[todo[todo.length - 1].id] = [exI];
-  const total = spread.reduce((a, b) => a + b.len, 0) || 1; let acc = 0, from = 0;
+  // what fits: about 30 min per week of material; if there is more, the most recent weeks first
+  // (the older ones were drilled in the séries already) and the rest is just skimmed
+  const capOf = b => Math.max(1, Math.round(b.len / 30)), cap = spread.reduce((a, b) => a + capOf(b), 0);
+  let skimmed = [];
+  if (pool.length > cap) { skimmed = pool.slice(0, pool.length - cap); pool = pool.slice(-cap); }
+  const total = spread.reduce((a, b) => a + capOf(b), 0) || 1; let acc = 0, from = 0;
   spread.forEach((b, k) => {
-    acc += b.len;
+    acc += capOf(b);
     let to = k === spread.length - 1 ? pool.length : Math.round(pool.length * acc / total);
     if (to <= from && from < pool.length) to = from + 1;
     plan[b.id] = pool.slice(from, to); from = to;
   });
-  return { topics, plan, mk };
+  return { topics, plan, mk, skimmed, first: spread[0] && spread[0].id };
 }
 // official exams: 3 passes over the whole material; each block takes the next topics not done yet in its pass
 function examTopics(subj, examIso, pass) {
   const base = revTopics(subj, examIso).filter(t => !t.last);
-  if (pass === 0) return base.map(t => ({ label: t.label, sub: 'cours + 1-2 exos clés', files: t.files }));
-  if (pass === 1) return base.map(t => ({ label: t.label, sub: 'exos des séries sans corrigé', files: t.files }));
+  if (pass === 0) return base.map(t => ({ label: t.label, sub: 'cours + 1-2 exos clés', files: t.files, w: t.w }));
+  if (pass === 1) return base.map(t => ({ label: t.label, sub: 'exos des séries sans corrigé', files: t.files, w: t.w }));
   const ex = mdFiles(subj).filter(i => i.kind === 'exam');
   const list = ex.length ? ex.map(i => ({ label: mdName(i), sub: 'en conditions réelles, puis correction', files: [i.file] })) : [1, 2, 3].map(k => ({ label: 'Ancien examen n°' + k, sub: 'en conditions réelles, puis correction', files: [] }));
   return list.concat([{ label: 'Points faibles', sub: 'refais les exos ratés des examens', files: [] }]);
@@ -1216,7 +1235,9 @@ function examPlanFor(e, x, dayEv) {
   if (mine && mine.k === k) return { su, pass, topics, idx: mine.idx, k, done, mine: true };
   // how fast to go: what's left of this pass over the campaign days left in it
   const ds = L.examDays(state, su.exam), from = ds.indexOf(iso(x)), passEnd = Math.floor(ds.length * [0.45, 0.8, 1][pass]);
-  const daysLeft = Math.max(1, passEnd - Math.max(0, from)), left = topics.map((t, i) => i).filter(i => !done.has(i));
+  // only weeks already taught on that day (the campaign starts before the semester ends)
+  const taughtAt = L.semWeek(state, mondayOf(addDays(x, -1)));
+  const daysLeft = Math.max(1, passEnd - Math.max(0, from)), left = topics.map((t, i) => i).filter(i => !done.has(i) && !(taughtAt && topics[i].w != null && topics[i].w > taughtAt));
   const per = Math.max(1, Math.ceil(left.length / daysLeft));
   // several blocks the same day take consecutive topics
   const same = (dayEv || []).filter(z => z.kind === 'study' && z.subj === e.subj && /^Examen du /.test(z.title) && !(state.examBlk || {})[z.id] && z.state !== 'done').sort((a, b) => a.start - b.start);
@@ -1259,12 +1280,13 @@ function revLine(e, key, xdate, dayEv) {
   const m = /\((\S+) (\d{1,2})\)/.exec(e.title); const mock = (state.mocks || []).filter(x => x.subj === e.subj && x.date >= key).sort((a, b) => a.date < b.date ? -1 : 1).find(x => fromIso(x.date).getDate() === +(m ? m[2] : -1));
   if (!mock) return '';
   const ready = e.state !== 'done' ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="mockReady" data-v="${esc(mock.id)}">J’ai fini de réviser pour ce blanc</button></div>` : '';
-  const { topics, plan } = revPlan(e.subj, mock.date), idx = plan[e.id] || [];
+  const { topics, plan, skimmed, first } = revPlan(e.subj, mock.date), idx = plan[e.id] || [];
+  const skim = skimmed.length && first === e.id ? `<div class="su rev">Le reste (${esc(topics[skimmed[0]].label)}${skimmed.length > 1 ? ' → ' + esc(topics[skimmed[skimmed.length - 1]].label) : ''}) : juste feuillette tes fiches et refais un exo raté par semaine, si le temps le permet.</div>` : '';
   if (!idx.length) return `<div class="su rev">Tout est couvert : refais les exos qui t’ont posé problème.</div>${ready}`;
   const ts = idx.map(i => topics[i]);
   const label = ts.length <= 3 ? ts.map(t => t.label + (t.sub ? ' (' + t.sub + ')' : '')).join(', ') : ts[0].label + ' → ' + ts[ts.length - 1].label;
   const hasFiles = ts.some(t => t.files.length);
-  return `<div class="su rev"><b>À réviser :</b> ${esc(label)}</div>${hasFiles ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="revDocs" data-v="${esc(e.subj)}" data-d="${esc(mock.date)}" data-id="${esc(e.id)}">Docs à réviser</button></div>` : ''}${ready}`;
+  return `<div class="su rev"><b>À réviser :</b> ${esc(label)}</div>${skim}${hasFiles ? `<div class="md-links"><button type="button" class="linkbtn mini" data-act="revDocs" data-v="${esc(e.subj)}" data-d="${esc(mock.date)}" data-id="${esc(e.id)}">Docs à réviser</button></div>` : ''}${ready}`;
 }
 function revDocsSheet(subj, mockIso, id) {
   const { topics, plan } = revPlan(subj, mockIso), idx = plan[id] || [];
