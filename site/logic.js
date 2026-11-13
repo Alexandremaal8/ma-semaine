@@ -800,7 +800,11 @@ function generate(S0, weekStart, now) {
     const startT = x.date.getTime() + e.start * 6e4, endT = x.date.getTime() + e.end * 6e4;
     e.kind = 'study'; e.id = id; e.fixed = true; e.len = len;
     const su = subjOf(S, e.subj); e.sub = e.fsub || (su ? su.name : '') + ' · tous les ' + DAYS[x.d].toLowerCase() + 's';
-    if (rec && typeof rec === 'object') e.state = 'done';
+    if (rec && typeof rec === 'object') {
+      e.state = 'done';
+      // done with the chrono: shown at its real times (late start, overtime) and it pushes what comes after
+      if (rec.focus && rec.rs != null && rec.m) { e.start = rec.rs; e.end = Math.min(1439, rec.rs + Math.max(5, Math.round(rec.m))); e.real = true; }
+    }
     else if (endT <= nowT) { e.state = endT <= sinceT ? 'pre' : 'missed'; }
     else e.state = 'todo';
     if (e.exo) {
@@ -855,13 +859,51 @@ function generate(S0, weekStart, now) {
       live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed' }));
     } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
   });
-  for (const it of live.filter(x => x.real)) for (let i = live.length - 1; i >= 0; i--) {
-    const o = live[i];
-    if (o === it || o.d !== it.d || o.state === 'done' || o.fixed || !(o.start < it.end && o.end > it.start)) continue;
-    if (o.state === 'missed') lateMin -= Math.min(o.len, Math.max(0, Math.min(o.end, it.end) - Math.max(o.start, it.start)));
-    if (o.start >= it.start && o.end <= it.end) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); }
-    else if (o.start >= it.start) { const cut = it.end; o.len = o.end - cut; o.start = cut; o.startT = o.date.getTime() + cut * 6e4; if (o.len < 15) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); } }
-    else { o.end = it.start; o.endT = o.date.getTime() + it.start * 6e4; o.len = o.end - o.start; if (o.len < 15) { live.splice(i, 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); } }
+  // what the chrono really took (done blocks at their real times, and the chrono running right now) pushes the rest of the day:
+  // still on campus → the trip home waits for the chrono; the blocks it runs into slide later (and the ones after them),
+  // and what no longer fits before the evening goes back to the planner
+  {
+    const reals = live.filter(x => x.real).map(x => ({ d: x.d, start: x.start, end: x.end }))
+      .concat(days.flatMap(x => x.ev.filter(e => e.real && e.kind === 'study').map(e => ({ d: x.d, start: e.start, end: e.end }))));
+    if (running) {
+      const rs = new Date(running.start), rd = days.find(x => iso(x.date) === iso(rs));
+      if (rd && nowT > running.start) reals.push({ d: rd.d, start: rs.getHours() * 60 + rs.getMinutes(), end: Math.min(1439, Math.ceil((nowT - rd.date.getTime()) / 6e4 / 5) * 5), run: true });
+    }
+    for (const x of days) {
+      const R = reals.filter(r => r.d === x.d); if (!R.length) continue;
+      x.blockedExtra = R.map(r => ({ s: r.start, e: r.end }));
+      const mv = x.ev.find(e => e.kind === 'move' && /→ maison/.test(e.title));
+      if (mv) {
+        const end = Math.max(0, ...R.filter(r => r.start < mv.start).map(r => r.end));
+        if (end > mv.start) {
+          const ln = mv.end - mv.start, d0 = end - mv.start;
+          // the routines of the arrival home move with it
+          for (const e of x.ev) if (e !== mv && e.start >= mv.end && e.start < mv.end + 90 && ['routine', 'meal', 'chore'].includes(e.kind) && !e.fixedTime) { e.start += d0; e.end += d0; }
+          mv.start = end; mv.end = end + ln; mv.sub = 'après ton chrono'; x.blockedExtra.push({ s: mv.start, e: mv.end });
+        }
+      }
+      const busy = () => x.ev.filter(e => e.end > e.start && !['free', 'other', 'milestone'].includes(e.kind)).concat(R);
+      const inWay = o => R.some(r => o.start < r.end && o.end > r.start) || (mv && o.start < mv.end && o.end > mv.start);
+      const runId = running && running.id, swapId = running && running.swap && running.swap.id;
+      const mine = live.filter(o => o.d === x.d && !o.real && !o.fixed && o.id !== runId && o.id !== swapId && (o.state === 'todo' || (o.state === 'missed' && inWay(o)))).sort((a, b) => a.start - b.start);
+      const nowMin = x.date.getTime() <= nowT ? Math.ceil((nowT - x.date.getTime()) / 6e4 / 5) * 5 : 0;
+      const placed = [];
+      for (const o of mine) {
+        const hit = R.some(r => o.start < r.end && o.end > r.start) || placed.some(p => o.start < p.end && o.end > p.start) || (mv && o.start < mv.end && o.end > mv.start);
+        if (!hit) { placed.push(o); continue; }
+        if (o.state === 'missed') lateMin -= o.len;
+        const len = o.end - o.start, lim = x.wind;
+        let t = Math.max(o.start, nowMin, ...R.filter(r => r.start <= o.start + len).map(r => r.end));
+        const clash = u => busy().some(e => e.start < u + len && e.end > u) || placed.some(p => p.start < u + len && p.end > u);
+        while (t + 15 <= lim && clash(t)) t += 5;
+        const fit = Math.min(len, lim - t);
+        const gone = () => { live.splice(live.indexOf(o), 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); };
+        if (fit < 20 || clash(t) && fit === len) { gone(); continue; }
+        Object.assign(o, { start: t, end: t + fit, len: fit, startT: x.date.getTime() + t * 6e4, endT: x.date.getTime() + (t + fit) * 6e4, state: 'todo', underRun: undefined, pushed: true });
+        if (!future.includes(o)) future.push(o);
+        placed.push(o);
+      }
+    }
   }
   // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were
   // (fixed blocks like the Monday physics prep are already in the day: never show them twice)
@@ -882,7 +924,7 @@ function generate(S0, weekStart, now) {
   //    then daytime free time left on the remaining days (never on days off, trips or off-weekends)
   let extended = 0;
   const freeParts = (x, gs) => {
-    const taken = live.filter(s => s.d === x.d).map(s => ({ s: s.start - (+m.pause), e: s.end + (+m.pause) }));
+    const taken = live.filter(s => s.d === x.d).concat(x.blockedExtra || []).map(s => ({ s: (s.start ?? s.s) - (+m.pause), e: (s.end ?? s.e) + (+m.pause) }));
     const out = [];
     for (const g of gs) {
       let parts = [{ s: g.s, e: g.e }];

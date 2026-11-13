@@ -1372,7 +1372,7 @@ function foStop(finished, after) {
       const ev = fb.e, plan = ev.end - ev.start;
       revRemember(wk, r.id, finished ? null : Math.min(.95, min / plan)); examRemember(wk, r.id, finished ? null : Math.min(.95, min / plan));
       d[r.id] = { s: ev.subj, t: ev.title, m: min, d: fb.x.d, a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined, focus: true };
-      const rs = realStart(r, fb.x.date); if (rs != null && !ev.fixed) d[r.id].rs = rs;
+      const rs = realStart(r, fb.x.date); if (rs != null) d[r.id].rs = rs;
       if (!finished) d[r.id].p = Math.max(.05, Math.min(.95, min / plan));
     } else if (!r.id && r.subj) {
       // free session: it shows in the day and counts for that subject

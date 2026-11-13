@@ -244,3 +244,20 @@ console.log('focus OK');
   assert.ok(flex(g) >= before + (ex.end - ex.start) - 20, 'its série time is planned later');
   console.log('skipped session OK');
 }
+{
+  // a long chrono on campus: the trip home waits for it, what comes after slides later
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 13)), wk = L.iso(ws);
+  const ex = L.generate(S, ws, new Date(2026, 10, 13, 12))[4].ev.find(e => e.fixed && e.serie && e.start >= 780);
+  const at = (h, m) => new Date(2026, 10, 13, h, m);
+  S.focus = { run: { id: ex.id, start: at(Math.floor(ex.start / 60), ex.start % 60).getTime() } };
+  let day = L.generate(S, ws, at(17, 45))[4];
+  const mv = day.ev.find(e => e.kind === 'move' && /maison/.test(e.title));
+  assert.ok(mv && mv.start >= 17 * 60 + 45, 'trip home after the running chrono: ' + (mv && L.fmt(mv.start)));
+  assert.ok(!day.ev.some(e => e.kind === 'study' && e.state === 'todo' && e.start < mv.end && e.end > mv.start), 'nothing on the trip home');
+  S.focus = {}; S.done[wk] = { [ex.id]: { s: ex.subj, t: ex.title, m: 190, d: 4, a: ex.start, rs: ex.start, focus: true, serie: true, fx: true } };
+  day = L.generate(S, ws, at(17, 50))[4];
+  const me = day.ev.find(e => e.id === ex.id), mv2 = day.ev.find(e => e.kind === 'move' && /maison/.test(e.title));
+  assert.ok(me.end === ex.start + 190 && mv2.start === me.end, 'real times, then home');
+  console.log('chrono pushes OK');
+}
