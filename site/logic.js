@@ -314,6 +314,9 @@ function layoutDay(S, m, weekStart, d) {
       return parts;
     });
   }
+  // a mock exam is on campus too (unless it says online): wake-up, commute and leave-home reminder like a course
+  const onlineMk = mk => /en ligne|online|maison|home|distance|moodle/i.test(mk.place || '');
+  dayMocks.filter(mk => !onlineMk(mk)).forEach(mk => courses.push({ id: 'mock-' + (mk.id || mk.subj), day: d, start: mk.start, end: mk.end, subj: mk.subj, type: 'Examen blanc', room: mk.place || '' }));
   // an exam with its time is a morning on campus: wake-up, commute and leave-home reminder like a course
   S.subjects.filter(su => su.exam === dIso && su.examStart != null && su.examEnd > su.examStart).forEach(su => {
     courses = courses.filter(c => c.end <= su.examStart || c.start >= su.examEnd);
@@ -331,11 +334,12 @@ function layoutDay(S, m, weekStart, d) {
   courses.forEach(c => { const su = subjOf(S, c.subj);
     // exercise sessions are when the série gets done: a série block (checkable, counted in the série's time)
     if (c.type === 'Exercices' && su && su.serie) { ev.push({ kind: 'fixed', exo: true, start: c.start, end: c.end, title: 'Séance d’exercices', subj: c.subj, fsub: [su.name, c.room].filter(Boolean).join(' · '), cid: c.id, room: c.room || '' }); return; }
+    if (c.type === 'Examen blanc') { ev.push({ kind: 'course', start: c.start, end: c.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: [c.room, 'bonne chance !'].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, room: c.room || '', mock: true }); return; }
     if (c.type === 'Examen') { ev.push({ kind: 'course', start: c.start, end: c.end, title: 'Examen · ' + (su ? su.name : ''), sub: [c.room, 'bonne chance !'].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, room: c.room || '', exam: true }); return; }
     ev.push({ kind: 'course', start: c.start, end: c.end, title: su ? su.name : 'Cours', sub: [c.type + (c.afterMock ? ' (après l’examen blanc)' : ''), c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id, room: c.room || '' }); });
   (S.events || []).filter(x => x.date === dIso && x.end > x.start).forEach(x => ev.push({ kind: 'event', start: x.start, end: x.end, title: x.title || 'Événement', sub: x.place || '', eid: x.id }));
   S.subjects.filter(su => su.exam === dIso && !(su.examStart != null && su.examEnd > su.examStart)).forEach(su => ev.push({ kind: 'event', start: wake + 30, end: wake + 30, title: 'Examen · ' + su.name, sub: 'bonne chance !', subj: su.id, exam: true }));
-  dayMocks.forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
+  dayMocks.filter(onlineMk).forEach(x => { const su = subjOf(S, x.subj); ev.push({ kind: 'event', start: x.start, end: x.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: x.place || 'facultatif, mais on veut être prêt', subj: x.subj, mock: true }); });
   // project sessions with your partner (one date, or every week until the due date)
   for (const p of S.projects || []) for (const ss of p.sessions || []) {
     if (!ss.date || !(ss.end > ss.start)) continue;
@@ -369,7 +373,7 @@ function layoutDay(S, m, weekStart, d) {
     goHome = ret;
     if (free(ret, ret + COMMUTE)) ev.push({ kind: 'move', start: ret, end: ret + COMMUTE, title: 'EPFL → maison' });
     // exam morning: nothing new before it, just your summary sheet
-    const ex = courses.find(c => c.type === 'Examen');
+    const ex = courses.find(c => c.type === 'Examen' || c.type === 'Examen blanc');
     if (ex && ex.start === firstC) { const a0 = Math.max(wake + 35, ...busy().filter(b => b.end <= firstC - COMMUTE - 5 && b.start < wake + 60).map(b => b.end)), b0 = firstC - COMMUTE - 5;
       if (b0 - a0 >= 15 && free(a0, b0)) ev.push({ kind: 'rest', start: a0, end: b0, title: 'Avant l’examen', sub: 'relis ta fiche, rien de nouveau · respire' }); }
   }

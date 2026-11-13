@@ -218,3 +218,16 @@ console.log('focus OK');
   S.mocks = []; const meta0 = L.generate(S, ws, new Date(2026, 10, 14, 10)).meta;
   console.log('mock over OK');
 }
+{
+  // a mock exam is a morning on campus: commute, leave-home reminder, nothing else before it
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  S.mocks = [{ id: 'm1', subj: 'alg', date: '2026-11-13', start: 495, end: 600, place: '' }];
+  const day = L.generate(S, L.mondayOf(new Date(2026, 10, 13)), new Date(2026, 10, 13, 6))[4];
+  const mk = day.ev.find(e => e.mock);
+  assert.ok(mk && mk.kind === 'course' && mk.start === 495, 'mock as a campus slot');
+  assert.ok(day.ev.some(e => e.kind === 'move' && e.end <= 495), 'commute before the mock');
+  assert.ok(!day.ev.some(e => e.kind === 'study' && e.start < 495), 'no study before the mock');
+  S.mocks[0].place = 'en ligne sur Moodle';
+  assert.ok(L.generate(S, L.mondayOf(new Date(2026, 10, 13)), new Date(2026, 10, 13, 6))[4].ev.some(e => e.mock && e.kind === 'event'), 'online mock stays at home');
+  console.log('mock day OK');
+}
