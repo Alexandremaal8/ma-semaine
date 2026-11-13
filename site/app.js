@@ -678,8 +678,12 @@ function ciCandidates() {
     if (ws.getTime() + 7 * 864e5 < (state.since || 0)) continue;
     for (const x of L.generate(state, ws)) for (const e of x.ev) {
       if (e.kind !== 'study' || e.state !== 'missed' || asked[e.id] || (state.chronoTruth !== false && !e.fixed)) continue;
-      const endT = x.date.getTime() + e.end * 6e4;
+      const endT = x.date.getTime() + e.end * 6e4, startT = x.date.getTime() + e.start * 6e4;
       if (nowT - endT > 36 * 3600e3) continue;
+      // you ran a chrono on something else during it: you chose to skip it, no need to ask
+      const runs = (FO().log || []).map(l => [l.at, l.end || l.at]).concat(foRun() ? [[foRun().start, nowT]] : []);
+      const over = runs.reduce((m, [a, b]) => m + Math.max(0, Math.min(b, endT) - Math.max(a, startT)), 0);
+      if (over >= (endT - startT) * .4) continue;
       out.push({ wk, id: e.id, e, date: x.date, endT });
     }
   }
