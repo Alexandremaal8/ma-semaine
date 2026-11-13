@@ -37,7 +37,7 @@ for(const mode of L.MODE_ORDER){const S=L.defaultState();S.mode=mode;S.since=0;c
  const S=L.normalize(old);console.log('migration:',S.v,S.wake,S.sleep,S.routines.map(r=>r.kind).join(','),S.subjects[0].serie);check(S,new Date(2026,10,10,12,0),'migr');}
 console.log(bad?'FAIL '+bad:'OK');
 // 8. trip to Lebanon + modes per week + mock exam
-{const S=L.defaultState();S.since=0;S.trips=[{id:'t',title:'Liban',from:'2026-12-20',to:'2027-01-02',light:60}];
+{const S=L.defaultState();S.since=0;S.subjects.find(x=>x.id==='prog').exam='';S.trips=[{id:'t',title:'Liban',from:'2026-12-20',to:'2027-01-02',light:60}];
  S.subjects[0].exam='2027-01-25';S.mocks=[{id:'m',subj:'alg',date:'2026-11-18',start:615,end:720}];
  const rec=L.recommendMode(S,new Date(2026,10,30));console.log('reco 30 nov:',rec&&rec.mode,'|',rec&&rec.why);
  const rec2=L.recommendMode(S,new Date(2027,0,4));console.log('reco 4 janv:',rec2&&rec2.mode);

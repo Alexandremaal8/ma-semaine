@@ -24,7 +24,7 @@ console.log('weekly OK');
   // the prog "exam" of 25 Nov becomes Mini-projet 2 (25 Nov → 17 Dec)
   const old = L.defaultState(); old.v = 9; delete old.projects; old.subjects.find(x => x.id === 'prog').exam = '2026-11-25';
   const S2 = L.normalize(JSON.parse(JSON.stringify(old))); S2.since = new Date(2026, 10, 1).getTime();
-  assert.equal(S2.subjects.find(x => x.id === 'prog').exam, '');
+  assert.equal(S2.subjects.find(x => x.id === 'prog').exam, '2026-12-12', 'v11: the real prog exam of 12 Dec');
   assert.deepEqual(S2.projects.map(p => [p.title, p.from, p.to]), [['Mini-projet 2', '2026-11-25', '2026-12-17']]);
   S2.projects[0].sessions = [{ date: '2026-11-27', start: 975, end: 1080, weekly: true }];
   let total = 0;

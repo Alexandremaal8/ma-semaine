@@ -124,14 +124,14 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 10, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 11, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
       { id: 'alg', name: 'Algèbre linéaire', color: '#1D4ED8', prio: 3, exam: '', serie: 180, corr: 30 },
       { id: 'phy', name: 'Physique (mécanique)', color: '#047857', prio: 2, exam: '', serie: 150, corr: 30 },
       { id: 'aicc', name: 'AICC I', color: '#7C3AED', prio: 2, exam: '', serie: 150, corr: 30 },
-      { id: 'prog', name: 'Programmation', color: '#0E7490', prio: 2, exam: '', serie: 120, corr: 30 }
+      { id: 'prog', name: 'Programmation', color: '#0E7490', prio: 2, exam: '2026-12-12', serie: 120, corr: 30 }
     ],
     courses: [
       C(0, 615, 720, 'ana', 'Cours', 'CM 1 2 / CO 3'), C(0, 975, 1140, 'phy', 'Cours', 'CE 1 6'),
@@ -222,6 +222,11 @@ function normalize(s) {
       out.projects = [{ id: uid(), subj: prog.id, title: 'Mini-projet 2', from: '2026-11-25', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
     }
   }
+  if ((old.v || 0) < 11) {
+    // v10 → v11: the prog course also has a real exam, Saturday 12 Dec (besides Mini-projet 2)
+    const prog = (out.subjects || []).find(x => x.id === 'prog' || /programm/i.test(x.name));
+    if (prog && !prog.exam) prog.exam = '2026-12-12';
+  }
   out.modes = Object.assign({}, clone(MODE_DEFAULTS), out.modes || {});
   for (const k of MODE_ORDER) out.modes[k] = Object.assign({}, MODE_DEFAULTS[k], out.modes[k] || {});
   if (!MODE_ORDER.includes(out.mode)) out.mode = 'normal';
@@ -237,7 +242,7 @@ function normalize(s) {
   const cutoff = iso(addDays(mondayOf(new Date()), -7 * 20));
   for (const k of ['done', 'frozen', 'weekModes', 'autoModes', 'serieDone', 'rolled', 'asked', 'serieEst', 'serieAi', 'serieProg', 'corrMan'])
     if (out[k] && typeof out[k] === 'object') for (const wk of Object.keys(out[k])) if (/^\d{4}-\d{2}-\d{2}$/.test(wk) && wk < cutoff) delete out[k][wk];
-  out.v = 10;
+  out.v = 11;
   return out;
 }
 
@@ -255,7 +260,8 @@ const examsWithin = (S, from, days) => S.subjects.filter(su => su.exam && (fromI
 /* What the app would pick by itself for a week, with the reason. Order matters: exams first, then trips, then backlog. */
 function recommendMode(S, weekStart) {
   const end = addDays(weekStart, 7);
-  const soon = examsWithin(S, weekStart, 21);
+  // during the semester (courses on) exam mode only the last two weeks: three weeks of it for one exam is too much
+  const soon = examsWithin(S, weekStart, coursesOnFor(S, weekStart) ? 14 : 21);
   if (soon.length) return { mode: 'exam', why: 'Examen : ' + soon[0].name + ', le ' + dateLbl(fromIso(soon[0].exam)) };
   for (const t of S.trips || []) {
     if (!t.from || !t.to) continue;
