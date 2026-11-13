@@ -77,6 +77,7 @@ async function pull(force, replace) {
       const mine = !replace && unpushed() ? state : null;      // changes made here and not sent yet are kept
       state = mine ? mergeStates(r.state, mine) : L.normalize(r.state); state.notif.on = notifOn;
       lsSet(LS, JSON.stringify(state)); lsSet(UPD_LS, String(mine ? Math.max(Date.now(), r.updated + 1) : r.updated));   // a merge is newer than what it merged, even with clocks a bit off
+      if (backfillRealStarts()) lsSet(LS, JSON.stringify(state));
       renderAll(); if (tab === 'focus') renderFocus(); if (tab === 'sport') renderSport();
       if (mine) setTimeout(pushState, 300);
       return true;
@@ -1341,6 +1342,20 @@ function realStart(r, dayDate) {
   const st = new Date(r.start); if (iso(st) !== iso(dayDate)) return null;
   return st.getHours() * 60 + st.getMinutes();
 }
+// blocks done with the chrono before real times were kept (or exercise sessions, kept only since today):
+// the chrono log still knows when each one started, so they get their real times back
+function backfillRealStarts() {
+  let n = 0;
+  for (const l of (FO().log || [])) {
+    if (!l.id || !l.wk || !l.at) continue;
+    const rec = ((state.done || {})[l.wk] || {})[l.id];
+    if (!rec || typeof rec !== 'object' || !rec.focus || rec.rs != null || rec.d == null) continue;
+    const st = new Date(l.at), day = addDays(fromIso(l.wk), rec.d);
+    if (iso(st) !== iso(day)) continue;
+    rec.rs = st.getHours() * 60 + st.getMinutes(); n++;
+  }
+  return n;
+}
 function foSwapSlot(fb, wk) {
   const e = fb.e, now = new Date();
   if (!e || e.fixed || e.kind !== 'study' || e.state === 'done' || wk !== iso(mondayOf(now))) return null;
@@ -2264,6 +2279,8 @@ if (APP !== 'main') {
   const m = /^#lien-([a-f0-9]{32})$/.exec(location.hash);
   if (m) { history.replaceState(null, '', location.pathname); await linkWith(m[1]); }
   else await pull(false);
+  if (moodle) mdNorm(moodle);
+  if (backfillRealStarts()) { save(); renderAll(); }
   rollover();
   setTimeout(autoCheck, 300);
   setTimeout(checkIn, 1200);
@@ -2283,6 +2300,7 @@ document.addEventListener('visibilitychange', async () => {
   if (foRun() || sportRun) keepAwake(true);
   await pull(false);
   if (moodle) mdNorm(moodle);
+  if (backfillRealStarts()) save();
   rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000); setTimeout(foStaleCheck, 1400);
   if (tab === 'today') keepScroll(renderToday);
   syncAll();
