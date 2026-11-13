@@ -761,6 +761,13 @@ function roomSheet(cid) {
 
 /* ---------- Moodle (lien calendrier) ---------- */
 const MD_LS = LS + '-moodle';
+// a sheet named just "Exercise" in a dated weekly section gets the number of that teaching week
+function mdNorm(d) {
+  for (const i of (d && d.items) || []) if (i.num == null && i.secDay && (i.kind === 'serie' || i.kind === 'correction')) {
+    const n = L.semWeek(state, mondayOf(fromIso(i.secDay))); if (n > 0) { i.num = n; i.nice = (i.kind === 'serie' ? 'Série ' : 'Corrigé série ') + n; }
+  }
+  return d;
+}
 let moodle = (() => { try { return JSON.parse(lsGet(MD_LS)); } catch (e) { return null; } })();
 const MD_GUESS = { ana: /analys|math-101/, alg: /algebr|math-111/, phy: /physi|phys-101/, aicc: /aicc|cs-101|information.*comput/, prog: /programm|cs-107|cs-108|cs-111/ };
 const deacc = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -802,7 +809,7 @@ async function mdFetch(force) {
   if (!force && moodle && Date.now() - (moodle.fetched || 0) < 30 * 60e3) return;
   try {
     const d = await fetch(WORKER + '/moodle?k=' + syncKey() + (force ? '&force=1' : '')).then(r => r.json());
-    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); mdApply(); mdAutoDone(); keepScroll(renderAll); }
+    if (d && !d.error && !d.none) { d.fetched = Date.now(); moodle = mdNorm(d); lsSet(MD_LS, JSON.stringify(d)); mdApply(); mdAutoDone(); keepScroll(renderAll); }
     return d;
   } catch (e) { return null; }
 }
@@ -824,7 +831,7 @@ function moodleConnect() {
       const ok = await ensureKey();
       let d = null; if (ok) d = await post('/moodle', { k: syncKey(), ical: link }).then(r => r.json()).catch(() => null);
       if (!d || d.error || (d.errors && d.errors.ical)) { if (btn) { btn.disabled = false; btn.textContent = 'Connecter'; } toast(d ? (d.error || d.errors.ical) : 'Serveur injoignable, réessaie'); return; }
-      d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d));
+      d.fetched = Date.now(); moodle = mdNorm(d); lsSet(MD_LS, JSON.stringify(d));
       state.moodleOn = true; save(); closeSheet(); renderAll();
       const n = mdEvents().filter(e => e.start > Date.now()).length;
       showCard('Moodle connecté', n + ' échéance' + (n > 1 ? 's' : '') + ' à venir trouvée' + (n > 1 ? 's' : '') + '. Je te proposerai de les ajouter au planning.');
@@ -941,7 +948,7 @@ function moodleKeySheet() {
       const b = $('#shBody .btn.pri'); if (b) { b.disabled = true; b.textContent = 'Vérification…'; }
       const d = await post('/moodle', { k: syncKey(), tokens: toks }).then(r => r.json()).catch(() => null);
       if (!d || d.error || !d.ok || !d.ok.api) { if (b) { b.disabled = false; b.textContent = 'Activer'; } toast(d ? (d.error || (d.errors && d.errors.api) || 'Moodle a refusé la clé') : 'Serveur injoignable, réessaie'); return; }
-      d.fetched = Date.now(); moodle = d; lsSet(MD_LS, JSON.stringify(d)); closeSheet(); mdApply(); mdAutoDone(); renderAll();
+      d.fetched = Date.now(); moodle = mdNorm(d); lsSet(MD_LS, JSON.stringify(d)); closeSheet(); mdApply(); mdAutoDone(); renderAll();
       showCard('Moodle entièrement relié', (d.user ? 'Salut ' + d.user + ' ! ' : '') + (d.courses || []).length + ' cours suivis : séries, corrigés et annonces arrivent maintenant dans l’app.');
     })();
     return false;
@@ -959,8 +966,10 @@ function mdPick(subj, kind, n, wk) {
   const fs = mdFiles(subj).filter(i => i.kind === kind);
   const byNum = n ? fs.find(i => i.num === n) : null; if (byNum) return byNum;
   if (!wk) return null;
+  // a sheet without number placed in a dated weekly section ("9 nov. - 15 nov."): the section's week
+  const bySec = fs.find(i => i.secDay && iso(mondayOf(fromIso(i.secDay))) === wk); if (bySec) return bySec;
   const a = fromIso(wk).getTime() - 7 * 864e5, b = fromIso(wk).getTime() + 7 * 864e5;
-  return fs.find(i => i.time >= a && i.time < b) || null;
+  return fs.find(i => i.time >= a && i.time < b && i.num == null) || fs.find(i => i.time >= a && i.time < b) || null;
 }
 function mdFileFor(e, wk) {
   if (e.kind !== 'study' || !e.subj || !(e.serie || e.corr)) return null;
@@ -2273,6 +2282,7 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') { flushNow(); return; }
   if (foRun() || sportRun) keepAwake(true);
   await pull(false);
+  if (moodle) mdNorm(moodle);
   rollover(); setTimeout(autoCheck, 300); setTimeout(checkIn, 1000); setTimeout(foStaleCheck, 1400);
   if (tab === 'today') keepScroll(renderToday);
   syncAll();

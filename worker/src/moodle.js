@@ -51,6 +51,23 @@ export function kindOf(name) {
 }
 const numOf = name => { const m = /(?:s[ée]rie|serie|exercices?|exercises?|exos?|sheet|week|semaine|set|feuille|td|ex|sol|corrig[ée]|solutions?)[\s_\-]*n?[°o.]?[\s_\-]*0?(\d{1,2})(?!\d)/i.exec(name || '') || /(?:^|[^\d])0?(\d{1,2})(?!\d)/.exec((name || '').replace(/[A-Z]{2,5}-\d{3}/g, '')); return m ? +m[1] : null; };
 
+// number of a course section: "Week 9" / "Semaine 9" / "Série 9", or, for date-named weekly sections, its position
+export function sectionNum(sec) {
+  const n = strip(sec && sec.name || '');
+  const m = /(?:week|semaine|woche|s[ée]rie|serie|session|cours|lecture|chapitre|chapter|w)\s*n?[°o.]?\s*0?(\d{1,2})(?!\d)/i.exec(n);
+  if (m) return +m[1];
+  if (sec && sec.section > 0 && sec.section < 20 && !/\d/.test(n)) return sec.section;
+  return null;
+}
+// a weekly section named by its dates ("9 novembre - 15 novembre", "9 November - 15 November"): the ISO day it starts
+const MONTHS = [/^janv|^jan/i, /^f[ée]v|^feb/i, /^mar/i, /^avr|^apr/i, /^mai|^may/i, /^juin|^jun/i, /^juil|^jul/i, /^ao[uû]|^aug/i, /^sep/i, /^oct/i, /^nov/i, /^d[ée]c|^dec/i];
+export function sectionStart(sec, now = new Date()) {
+  const m = /(\d{1,2})\s*(?:er)?\.?\s+([a-zéû]{3,})/i.exec(strip(sec && sec.name || '')); if (!m) return null;
+  const mo = MONTHS.findIndex(r => r.test(m[2])); if (mo < 0) return null;
+  let y = now.getFullYear(); const d = new Date(Date.UTC(y, mo, +m[1]));
+  if (d - now > 200 * 864e5) d.setUTCFullYear(y - 1); else if (now - d > 200 * 864e5) d.setUTCFullYear(y + 1);
+  return d.toISOString().slice(0, 10);
+}
 export async function readApi(token) {
   const site = await ws(token, 'core_webservice_get_site_info');
   const courses = (await ws(token, 'core_enrol_get_users_courses', { userid: site.userid })) || [];
@@ -61,19 +78,22 @@ export async function readApi(token) {
     try {
       const sections = await ws(token, 'core_course_get_contents', { courseid: c.id });
       for (const sec of sections || []) for (const mod of sec.modules || []) {
+        const secNum = sectionNum(sec), secDay = sectionStart(sec);
         if (mod.visible === 0 || mod.uservisible === false) continue;
         const files = (mod.contents || []).filter(f => f.type === 'file' && f.fileurl).slice(0, 12);
         const name = strip(mod.name), base = { course: c.id, section: strip(sec.name).slice(0, 80), url: (mod.url || '').slice(0, 300) };
         if (!files.length) {
           const t = mod.added || 0; if (!t || t < now - 150 * 86400) continue;
-          items.push({ ...base, title: name.slice(0, 160), nice: niceName(name, kindOf(name), numOf(name)), time: t * 1000, kind: kindOf(name), num: numOf(name) });
+          const k0 = kindOf(name), n0 = numOf(name) ?? (k0 === 'serie' || k0 === 'correction' ? secNum : null);
+          items.push({ ...base, title: name.slice(0, 160), nice: niceName(name, k0, n0), time: t * 1000, kind: k0, num: n0, secDay: n0 == null && secDay ? secDay : undefined });
           continue;
         }
         for (const f of files) {
           const t = f.timemodified || f.timecreated || mod.added || 0; if (!t || t < now - 150 * 86400) continue;
           const label = files.length === 1 ? name : name + ' · ' + strip(f.filename).replace(/\.pdf$/i, '');
-          const kind = kindOf(name + ' ' + f.filename), num = numOf(name + ' ' + f.filename);
-          items.push({ ...base, title: label.slice(0, 160), nice: niceName(label, kind, num), time: t * 1000, kind, num, file: f.fileurl.slice(0, 400), mime: (f.mimetype || '').slice(0, 60) });
+          // a sheet just called "Exercise" inside its week: the week gives the number
+          const kind = kindOf(name + ' ' + f.filename), num = numOf(name + ' ' + f.filename) ?? (kind === 'serie' || kind === 'correction' ? secNum : null);
+          items.push({ ...base, title: label.slice(0, 160), nice: niceName(label, kind, num), time: t * 1000, kind, num, file: f.fileurl.slice(0, 400), mime: (f.mimetype || '').slice(0, 60), secDay: num == null && secDay ? secDay : undefined });
         }
       }
     } catch (e) { /* one course failing must not break the others */ }

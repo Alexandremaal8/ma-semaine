@@ -13,7 +13,7 @@ globalThis.fetch = async (u, o) => {
   const R = {
     core_webservice_get_site_info: { userid: 5, firstname: 'Alex' },
     core_enrol_get_users_courses: [{ id: 11, fullname: 'Analyse I', shortname: 'MATH-101' }],
-    core_course_get_contents: [{ name: 'Semaine 9', modules: [{ name: 'Série 9', added: now-3600, url: 'u', contents: [{ type: 'file', filename: 'serie9.pdf', timemodified: now-3600 }] }, { name: 'Corrigé série 8', added: now-100, contents: [] }] }],
+    core_course_get_contents: [{ name: 'Semaine 9', modules: [{ name: 'Série 9', added: now-3600, url: 'u', contents: [{ type: 'file', filename: 'serie9.pdf', timemodified: now-3600 }] }, { name: 'Corrigé série 8', added: now-100, contents: [] }] }, { name: 'Week 9', section: 10, modules: [{ name: 'Exercise', added: now-7200, contents: [{ type: 'file', filename: 'Exercise.pdf', fileurl: 'https://moodle.epfl.ch/webservice/pluginfile.php/9/Exercise.pdf', timemodified: now-7200 }] }] }],
     mod_forum_get_forums_by_courses: [{ id: 3, course: 11, type: 'news' }],
     mod_forum_get_forum_discussions: { discussions: [{ name: 'Salle changée', message: '<p>CO1 &amp; CO2</p>', timemodified: now-50 }] },
     core_calendar_get_action_events_by_timesort: { events: [{ id: 9, name: 'Quiz 3 is due', timestart: Date.UTC(2026,10,13,22,59)/1000, course: { id: 11, fullname: 'Analyse I' } }, { id: 10, name: 'Devoir 2', timestart: now+86400, course: { id: 11, fullname: 'Analyse I' } }] }
@@ -27,7 +27,8 @@ assert.equal(r.status, 400);
 r = await moodleRoute(new Request('https://x/moodle', { method: 'POST', body: JSON.stringify({ k, ical: 'https://moodle.epfl.ch/calendar/export_execute.php?userid=1&authtoken=abc', token: 'ab'.repeat(16) }) }), { KV }, new URL('https://x/moodle'), json);
 const d = await r.json();
 assert.ok(d.ok.ical && d.ok.api, JSON.stringify(d.errors));
-assert.equal(d.events.length, 3, 'dedup ical/api'); assert.equal(d.items.length, 2); assert.equal(d.items[0].kind, 'correction'); assert.equal(d.announcements[0].text, 'CO1 & CO2'); assert.equal(d.user, 'Alex');
+assert.equal(d.events.length, 3, 'dedup ical/api'); assert.equal(d.items.length, 3);
+{ const ex = d.items.find(i => i.title === 'Exercise'); assert.ok(ex && ex.kind === 'serie' && ex.num === 9 && ex.nice === 'Série 9', 'AICC "Exercise" in Week 9 → série 9: ' + JSON.stringify(ex)); } assert.equal(d.items[0].kind, 'correction'); assert.equal(d.announcements[0].text, 'CO1 & CO2'); assert.equal(d.user, 'Alex');
 console.log('moodle OK');
 // several candidate keys: the one Moodle accepts is kept
 {
@@ -106,6 +107,13 @@ console.log('moodle OK');
   assert.ok(/costaude/.test(r2.heads[0].title) && /exo 3 plus durs/.test(r2.heads[0].body) && /d’habitude/.test(r2.heads[0].body), r2.heads[0].body);
   const saved = JSON.parse(kv.get('mdig:k1')).items[2].est;
   assert.ok(saved.per.reduce((a, b) => a + b, 0) >= 225 && saved.hard.length === 1 && saved.level === 'heavy', 'per rescaled, impossible exo numbers dropped');
+  // AICC style: sheets just called "Exercise", one per weekly section
+  const { sectionNum, sectionStart, kindOf: kO } = await import('../worker/src/moodle.js');
+  assert.equal(kO('Exercise'), 'serie'); assert.equal(kO('Exercise - solution'), 'correction');
+  assert.equal(sectionNum({ name: 'Week 9', section: 10 }), 9);
+  assert.equal(sectionNum({ name: '', section: 9 }), 9);
+  assert.equal(sectionNum({ name: '9 novembre - 15 novembre', section: 10 }), null);
+  assert.equal(sectionStart({ name: '9 November - 15 November' }, new Date(2026, 10, 13)), '2026-11-09');
   globalThis.fetch = realFetch;
   console.log('moodle study OK');
 }
