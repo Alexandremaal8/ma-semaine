@@ -1541,6 +1541,11 @@ function serieSheet(sc, fo) {
 }
 // the line under a série block: where you are and what is left
 function serieProgLine(e, wk) {
+  // a correction to check while the série isn't said finished: say where you are, the série gets its time first
+  if (e.kind === 'study' && e.corr && e.state === 'todo' && !(((state.serieDone || {})[wk] || {})[e.subj])) {
+    const sc = serieCtx(Object.assign({}, e, { corr: false, serie: true, title: 'Série' }), wk);
+    if (sc) return `<div class="md-links"><button type="button" class="linkbtn mini" data-act="foSerieC" data-w="${esc(wk)}" data-v="${esc(e.subj)}">Série pas encore finie ?</button></div>`;
+  }
   const sc = e.kind === 'study' && e.state !== 'done' ? serieCtx(e, wk) : null; if (!sc) return '';
   const p = sc.pr;
   const left = p ? Math.max(0, L.serieMinOf(state, wk, subjOf(state, sc.subj)) - L.serieSpent(state, wk, sc.subj).all) : 0;
@@ -1603,6 +1608,7 @@ function focusAction(a, v, b) {
       else if (v === 'drop') foCancel();
       else { r.paused = (r.paused || 0) + Math.max(0, foElapsed(r) - (r.plan || 60) * 6e4); save(); setTimeout(foEndSheet, 300); }
       return true; }
+    case 'foSerieC': { const sc = serieCtx({ kind: 'study', subj: v, serie: true, title: 'Série' }, b.dataset.w); if (sc) serieSheet(sc, null); return true; }
     case 'foSerie': { const fb = findBlock(b.dataset.w, v), sc = fb && serieCtx(fb.e, b.dataset.w); if (sc) serieSheet(sc, null); return true; }
     case 'foStop': closeSheet(); setTimeout(() => foStop(v === '1'), 250); return true;
     case 'foCancel': foCancel(); return true;

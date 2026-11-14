@@ -283,3 +283,17 @@ console.log('focus OK');
   for (let i = 0; i < timed.length; i++) for (let j = i + 1; j < timed.length; j++) assert.ok(!(timed[i].start < timed[j].end && timed[j].start < timed[i].end), 'overlap ' + timed[i].title + ' / ' + timed[j].title);
   console.log('day follows OK');
 }
+{
+  // extra série time never eats the correction; once you say where you are, the rest of the série comes before it
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 9)), wk = L.iso(ws);
+  let g = L.generate(S, ws, new Date(2026, 10, 9, 6)); S.done[wk] = {};
+  for (const x of g) for (const e of x.ev) if (e.subj === 'phy' && e.kind === 'study' && e.serie && !e.corr && x.d < 5) S.done[wk][e.id] = { s: 'phy', t: e.title, m: e.end - e.start, d: x.d, a: e.start, serie: true, fx: e.fixed || undefined };
+  S.done[wk].x45 = { s: 'phy', t: 'Série 9', m: 45, d: 4, a: 600, serie: true };
+  const left = () => L.generate(S, ws, new Date(2026, 10, 14, 10)).flatMap(x => x.ev.filter(e => e.subj === 'phy' && e.kind === 'study' && e.state === 'todo').map(e => ({ t: x.d * 1440 + e.start, corr: e.corr, serie: e.serie })));
+  assert.ok(left().some(e => e.corr), 'extra série time: the correction is still to do');
+  L.serieReport(S, ws, 'phy', 3, 5);
+  const l = left(), fc = l.find(e => e.corr), ls = l.filter(e => e.serie && !e.corr).pop();
+  assert.ok(ls && (!fc || fc.t > ls.t), 'not finished: série first, correction after');
+  console.log('finish before correction OK');
+}

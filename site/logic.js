@@ -489,6 +489,7 @@ function serieReport(S, weekStart, subj, kDone, n, per) {
   const remPace = frac >= .08 && sp.serie >= 15 ? sp.serie * (1 - frac) / frac : remEst;
   const a = frac >= .08 && sp.serie >= 15 ? Math.min(.85, .35 + frac) : 0;
   const rem = Math.max(15, Math.round((remPace * a + remEst * (1 - a)) / 5) * 5);
+  P[subj].rem = rem;
   S.serieEst = S.serieEst || {}; (S.serieEst[key] = S.serieEst[key] || {})[subj] = Math.max(15, Math.min(600, rem + sp.all));
   return { done: false, rem, total: sp.serie + rem, frac, spent: sp.serie, pace: kDone ? sp.serie / kDone : null };
 }
@@ -791,7 +792,17 @@ function generate(S0, weekStart, now) {
     const dn = (doneBy[su.id] || 0) - (((S.serieDone || {})[key] || {})[su.id] ? Math.max(0, (serieMin[su.id] || 0) - exoDone) : 0);
     const mu = must[su.id] || 0;
     mustLeft[su.id] = Math.max(0, mu - dn);
-    corrLeft[su.id] = Math.min(corr[su.id] || 0, mustLeft[su.id]);
+    // the correction is only done by checking against it: extra time on the série doesn't eat it
+    const corrDone = Object.values(doneMap).filter(v => v && typeof v === 'object' && v.c && v.s === su.id).reduce((a, v) => a + (v.m || 0), 0);
+    corrLeft[su.id] = Math.max(0, (corr[su.id] || 0) - corrDone);
+    mustLeft[su.id] = Math.max(mustLeft[su.id], corrLeft[su.id]);
+    // you said where you are in the série: what is left is exactly that, minus what you did since and the sessions ahead
+    const pr = ((S.serieProg || {})[key] || {})[su.id];
+    if (pr && pr.rem != null && !((S.serieDone || {})[key] || {})[su.id]) {
+      const since = Math.max(0, serieSpent(S, key, su.id).serie - (pr.m || 0));
+      const exoFut = days.reduce((a, x) => a + x.ev.filter(e => e.exo && e.subj === su.id && x.date.getTime() + e.end * 6e4 > nowT && !doneMap[x.d + '-' + e.start + '-study']).reduce((b, e) => b + e.end - e.start, 0), 0);
+      mustLeft[su.id] = Math.max(0, pr.rem - since - exoFut) + corrLeft[su.id] + Math.max(0, (carry[su.id] || 0) - dn);
+    }
     carryLeft[su.id] = Math.max(0, (carry[su.id] || 0) - dn);
     revLeft[su.id] = Math.max(0, (rev[su.id] || 0) - Math.max(0, dn - mu));
   }
@@ -816,8 +827,9 @@ function generate(S0, weekStart, now) {
     if (e.exo) {
       e.serie = true; e.title = (wkN ? 'Série ' + wkN : 'Série') + ' · séance d’exercices';
       // a session missed: its part of the série goes back to the blocks ahead; a partial one counts for what was done
-      if (e.state === 'missed' && !((S.serieDone || {})[key] || {})[e.subj]) mustLeft[e.subj] = (mustLeft[e.subj] || 0) + len;
-      if (e.state === 'done' && rec.p != null && rec.p < 1) mustLeft[e.subj] = (mustLeft[e.subj] || 0) + Math.round(len * (1 - rec.p));
+      const rep = !!((S.serieProg || {})[key] || {})[e.subj];   // where you are was reported: it already says what is left
+      if (!rep && e.state === 'missed' && !((S.serieDone || {})[key] || {})[e.subj]) mustLeft[e.subj] = (mustLeft[e.subj] || 0) + len;
+      if (!rep && e.state === 'done' && rec.p != null && rec.p < 1) mustLeft[e.subj] = (mustLeft[e.subj] || 0) + Math.round(len * (1 - rec.p));
       continue;
     }
     revLeft[e.subj] = Math.max(0, (revLeft[e.subj] || 0) - len);
@@ -1084,7 +1096,7 @@ function generate(S0, weekStart, now) {
     // meals and trips are only markers: if a block kept from earlier sits on one, the marker gives way
     const solid = x.ev.filter(e => e.end > e.start && !['meal', 'move', 'rest', 'free'].includes(e.kind));
     x.ev = x.ev.filter(e => !['meal', 'move'].includes(e.kind) || !solid.some(o => o.start < e.end && o.end > e.start));
-    x.ev.sort((a, b) => a.start - b.start || (a.kind === 'milestone') - (b.kind === 'milestone'));
+    x.ev.sort((a, b) => a.start - b.start || (b.kind === 'milestone') - (a.kind === 'milestone'));
     x.ev.forEach(e => { if (!e.id) e.id = x.d + '-' + e.start + '-' + e.kind + (e.eid ? '-' + e.eid : ''); });
     x.plan = x.ev.filter(e => e.kind === 'study').reduce((a, e) => a + e.end - e.start, 0);
     x.dn = x.ev.filter(e => e.kind === 'study' && e.state === 'done').reduce((a, e) => a + e.end - e.start, 0);
