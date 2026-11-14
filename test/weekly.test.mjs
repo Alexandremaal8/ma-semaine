@@ -261,3 +261,25 @@ console.log('focus OK');
   assert.ok(me.end === ex.start + 190 && mv2.start === me.end, 'real times, then home');
   console.log('chrono pushes OK');
 }
+{
+  // sport started late and finished late: the laundry and the rest of the morning follow
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 14)), wk = L.iso(ws);
+  const sat = g => g[5].ev;
+  const sp = sat(L.generate(S, ws, new Date(2026, 10, 14, 9))).find(e => e.kind === 'sport');
+  const lessive = sat(L.generate(S, ws, new Date(2026, 10, 14, 9))).find(e => /Lessive/.test(e.title));
+  // while it runs (started 10:20, now 11:10)
+  S.sportLive = { id: sp.id, wk, start: new Date(2026, 10, 14, 10, 20).getTime() };
+  let ev = sat(L.generate(S, ws, new Date(2026, 10, 14, 11, 10)));
+  let les = ev.find(e => /Lessive/.test(e.title));
+  assert.ok(les.start >= 11 * 60 + 10, 'laundry waits for the workout: ' + L.fmt(les.start));
+  // finished at 11:25
+  delete S.sportLive; S.done[wk] = { [sp.id]: { k: 'sport', m: 65, w: 'A', rs: 620 } };
+  ev = sat(L.generate(S, ws, new Date(2026, 10, 14, 11, 25)));
+  const sp2 = ev.find(e => e.kind === 'sport'); les = ev.find(e => /Lessive/.test(e.title));
+  assert.ok(sp2.start === 620 && sp2.end === 685, 'sport at its real times 10:20–11:25');
+  assert.ok(les.start >= 685 && les.end - les.start === lessive.end - lessive.start, 'laundry right after, same length: ' + L.fmt(les.start));
+  const timed = ev.filter(e => e.end > e.start && !['free', 'other', 'milestone'].includes(e.kind) && e.start >= 620);
+  for (let i = 0; i < timed.length; i++) for (let j = i + 1; j < timed.length; j++) assert.ok(!(timed[i].start < timed[j].end && timed[j].start < timed[i].end), 'overlap ' + timed[i].title + ' / ' + timed[j].title);
+  console.log('day follows OK');
+}

@@ -865,50 +865,57 @@ function generate(S0, weekStart, now) {
       live.push(Object.assign({}, b, { id, state: pre ? 'pre' : 'missed' }));
     } else { const f = Object.assign({}, s, { id, state: 'todo' }); future.push(f); live.push(f); }
   });
-  // what the chrono really took (done blocks at their real times, and the chrono running right now) pushes the rest of the day:
-  // still on campus → the trip home waits for the chrono; the blocks it runs into slide later (and the ones after them),
-  // and what no longer fits before the evening goes back to the planner
+  // what really happened pushes the rest of the day: blocks done with the chrono and sport sessions at their real
+  // times, and whatever is running right now (chrono or workout). Still on campus → the trip home waits;
+  // everything after it — study blocks, sport, chores, meals — slides later in order, never over courses or
+  // fixed things; study that no longer fits before the evening goes back to the planner
   {
+    const dmk = S.done[key] || {};
+    for (const x of days) x.ev.forEach(e => { if (!e.id) e.id = x.d + '-' + e.start + '-' + e.kind + (e.eid ? '-' + e.eid : ''); }); // ids before anything moves
+    for (const x of days) for (const e of x.ev) if (e.kind === 'sport') { const r = dmk[e.id]; if (r && r.rs != null && r.m) { e.start = r.rs; e.end = Math.min(1439, r.rs + Math.max(5, Math.round(r.m))); e.real = true; } }
     const reals = live.filter(x => x.real).map(x => ({ d: x.d, start: x.start, end: x.end }))
-      .concat(days.flatMap(x => x.ev.filter(e => e.real && e.kind === 'study').map(e => ({ d: x.d, start: e.start, end: e.end }))));
-    if (running) {
-      const rs = new Date(running.start), rd = days.find(x => iso(x.date) === iso(rs));
-      if (rd && nowT > running.start) reals.push({ d: rd.d, start: rs.getHours() * 60 + rs.getMinutes(), end: Math.min(1439, Math.ceil((nowT - rd.date.getTime()) / 6e4 / 5) * 5), run: true });
+      .concat(days.flatMap(x => x.ev.filter(e => e.real && (e.kind === 'study' || e.kind === 'sport')).map(e => ({ d: x.d, start: e.start, end: e.end }))));
+    const sportLive = S.sportLive && S.sportLive.start && nowT - S.sportLive.start < 4 * 3600e3 ? S.sportLive : null;
+    for (const run of [running, sportLive]) if (run) {
+      const rs = new Date(run.start), rd = days.find(x => iso(x.date) === iso(rs));
+      if (rd && nowT > run.start) reals.push({ d: rd.d, start: rs.getHours() * 60 + rs.getMinutes(), end: Math.min(1439, Math.ceil((nowT - rd.date.getTime()) / 6e4 / 5) * 5), run: true });
     }
     for (const x of days) {
       const R = reals.filter(r => r.d === x.d); if (!R.length) continue;
       x.blockedExtra = R.map(r => ({ s: r.start, e: r.end }));
+      const first = Math.min(...R.map(r => r.start));
       const mv = x.ev.find(e => e.kind === 'move' && /→ maison/.test(e.title));
       if (mv) {
         const end = Math.max(0, ...R.filter(r => r.start < mv.start).map(r => r.end));
-        if (end > mv.start) {
-          const ln = mv.end - mv.start, d0 = end - mv.start;
-          // the routines of the arrival home move with it
-          for (const e of x.ev) if (e !== mv && e.start >= mv.end && e.start < mv.end + 90 && ['routine', 'meal', 'chore'].includes(e.kind) && !e.fixedTime) { e.start += d0; e.end += d0; }
-          mv.start = end; mv.end = end + ln; mv.sub = 'après ton chrono'; x.blockedExtra.push({ s: mv.start, e: mv.end });
-        }
+        if (end > mv.start) { const ln = mv.end - mv.start; mv.start = end; mv.end = end + ln; mv.sub = 'après ton chrono'; x.blockedExtra.push({ s: mv.start, e: mv.end }); }
       }
-      const busy = () => x.ev.filter(e => e.end > e.start && !['free', 'other', 'milestone'].includes(e.kind)).concat(R);
+      const runIds = [running && running.id, running && running.swap && running.swap.id, sportLive && sportLive.id];
+      // what may slide: routines and sport (movable), meals, and study blocks still to do
+      const shiftEv = x.ev.filter(e => (e.movable || e.kind === 'meal') && !e.real && e.end > e.start && !dmk[e.id] && !runIds.includes(e.id) && e.end > first && e.start >= first - 5);
+      const anchors = x.ev.filter(e => e.end > e.start && !['free', 'other', 'milestone'].includes(e.kind) && !e.real && !shiftEv.includes(e) && !runIds.includes(e.id));
       const inWay = o => R.some(r => o.start < r.end && o.end > r.start) || (mv && o.start < mv.end && o.end > mv.start);
-      const runId = running && running.id, swapId = running && running.swap && running.swap.id;
-      const mine = live.filter(o => o.d === x.d && !o.real && !o.fixed && o.id !== runId && o.id !== swapId && (o.state === 'todo' || (o.state === 'missed' && inWay(o)))).sort((a, b) => a.start - b.start);
+      const slots = live.filter(o => o.d === x.d && !o.real && !o.fixed && !runIds.includes(o.id) && (o.state === 'todo' || (o.state === 'missed' && inWay(o))));
+      // life first (sport, chores, meals keep their order), then study flows around them
+      const items = shiftEv.sort((a, b) => a.start - b.start).concat(slots.sort((a, b) => a.start - b.start));
       const nowMin = x.date.getTime() <= nowT ? Math.ceil((nowT - x.date.getTime()) / 6e4 / 5) * 5 : 0;
       const placed = [];
-      for (const o of mine) {
-        const hit = R.some(r => o.start < r.end && o.end > r.start) || placed.some(p => o.start < p.end && o.end > p.start) || (mv && o.start < mv.end && o.end > mv.start);
-        if (!hit) { placed.push(o); continue; }
+      for (const o of items) {
+        const isSlot = slots.includes(o), len = o.end - o.start;
+        const over = (u, l) => R.some(r => r.start < u + l && r.end > u) || placed.some(p => p.start < u + l && p.end > u) || anchors.some(e => e.start < u + l && e.end > u);
+        if (!over(o.start, len) && (!isSlot || o.start >= nowMin || o.state === 'todo')) { placed.push(o); continue; }
+        let t = Math.max(o.start, isSlot ? nowMin : 0, ...R.filter(r => r.start <= o.start + len).map(r => r.end));
+        const lim = isSlot ? x.wind : 1439;
+        while (t + 15 <= lim && over(t, len)) t += 5;
+        if (!isSlot) { o.start = t; o.end = Math.min(1439, t + len); o.sub = (o.sub ? o.sub + ' · ' : '') + 'décalé'; placed.push(o); continue; }
         if (o.state === 'missed') lateMin -= o.len;
-        const len = o.end - o.start, lim = x.wind;
-        let t = Math.max(o.start, nowMin, ...R.filter(r => r.start <= o.start + len).map(r => r.end));
-        const clash = u => busy().some(e => e.start < u + len && e.end > u) || placed.some(p => p.start < u + len && p.end > u);
-        while (t + 15 <= lim && clash(t)) t += 5;
         const fit = Math.min(len, lim - t);
         const gone = () => { live.splice(live.indexOf(o), 1); const fi = future.indexOf(o); if (fi >= 0) future.splice(fi, 1); };
-        if (fit < 20 || clash(t) && fit === len) { gone(); continue; }
+        if (fit < 20 || (over(t, len) && fit === len)) { gone(); continue; }
         Object.assign(o, { start: t, end: t + fit, len: fit, startT: x.date.getTime() + t * 6e4, endT: x.date.getTime() + (t + fit) * 6e4, state: 'todo', underRun: undefined, pushed: true });
         if (!future.includes(o)) future.push(o);
         placed.push(o);
       }
+      x.blockedExtra.push(...shiftEv.map(e => ({ s: e.start, e: e.end })));
     }
   }
   // done blocks that aren't regular slots (catch-up blocks done earlier) keep showing where they were

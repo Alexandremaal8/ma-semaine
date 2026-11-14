@@ -65,6 +65,8 @@ function mergeStates(remote, local) {
   const localSport = lastAt(local) > lastAt(R);
   R.sportLog = byKey(R.sportLog, local.sportLog, x => x.at).sort((a, b) => a.at - b.at).slice(-90);
   if (localSport) { R.sportProg = local.sportProg; R.sportNext = local.sportNext; }
+  const lives = [R.sportLive, local.sportLive].filter(x => x && x.start && !(R.sportLog || []).some(l => l.at === x.start)).sort((a, b) => b.start - a.start);
+  if (lives[0]) R.sportLive = lives[0]; else delete R.sportLive;
   return R;
 }
 async function pull(force, replace) {
@@ -1376,6 +1378,11 @@ function backfillRealStarts() {
     if (iso(st) !== iso(day)) continue;
     rec.rs = st.getHours() * 60 + st.getMinutes(); n++;
   }
+  // workouts finished before real times were kept: the sport log knows when they started and how long they took
+  for (const l of state.sportLog || []) {
+    const st = new Date(l.at), wk = iso(mondayOf(st)), d = (st.getDay() + 6) % 7, dm = (state.done || {})[wk] || {};
+    for (const [id, rec] of Object.entries(dm)) if (rec && rec.k === 'sport' && rec.rs == null && rec.w === l.w && +id.split('-')[0] === d) { rec.rs = st.getHours() * 60 + st.getMinutes(); rec.m = Math.max(5, l.min || rec.m); n++; }
+  }
   return n;
 }
 function foSwapSlot(fb, wk) {
@@ -1778,6 +1785,8 @@ function sportStart(wi, key, id) {
   const w = SP.workouts[wi];
   unlockAudio(); keepAwake(true);
   sportRun = { wi, key, id, step: 'warm', wIdx: 0, t: SP.warm[0][2], ex: 0, set: 0, reps: {}, lv: {}, startedAt: Date.now(), light: sportLightWeek() };
+  // the main app knows a workout is going on: what comes after it slides while it lasts
+  state.sportLive = { id, wk: key, start: sportRun.startedAt }; save(); syncSoon();
   openSheet('Sport · ' + w.name, `<div id="spBox" class="sp-box"></div><div class="sh-actions" id="spAct"></div>`);
   sportPaint(); sportTick();
 }
@@ -1845,7 +1854,9 @@ function sportFinish() {
   const notes = w.ex.filter(e => r.reps[e.id]).map(e => { const p = r.light ? { note: 'semaine légère : objectif gardé', up: false } : L.sportProgress(state, e.id, r.reps[e.id]); return `<div class="st-row ok"><span class="st-n">${p && p.up ? '↑' : '='}</span><span class="bd"><span class="ti">${esc(e.name)}</span><span class="su">${r.reps[e.id].join(' · ')}${e.time ? ' s' : ''} → ${esc(p ? p.note : '')}</span></span></div>`; }).join('');
   const dm = state.done[r.key] = state.done[r.key] || {};
   const took = Math.max(1, Math.round((Date.now() - r.startedAt) / 6e4));
-  if (r.id) dm[r.id] = { k: 'sport', m: Math.max(20, took), w: w.id };
+  // its real times: started late or ran long, the rest of the day follows
+  if (r.id) { dm[r.id] = { k: 'sport', m: took, w: w.id }; const st = new Date(r.startedAt); if (iso(st) === todayIso()) dm[r.id].rs = st.getHours() * 60 + st.getMinutes(); }
+  delete state.sportLive;
   state.sportNext = (r.wi + 1) % SP.workouts.length;
   state.sportLog = (state.sportLog || []).concat([{ at: r.startedAt, w: w.id, reps: r.reps, lv: r.lv, min: took, light: r.light || undefined }]).slice(-90);
   save(); syncSoon(); renderAll(); endChange();
@@ -1876,7 +1887,7 @@ function sportAction(a, v, b) {
     case 'sportPick': { const key = b.dataset.w, id = b.dataset.id; sportStart(+v, key, id); return true; }
     case 'sportGo': sportStart(+v, b.dataset.w, b.dataset.id); return true;
     case 'spResume': sportResume(); return true;
-    case 'spQuit': sportRun = null; clearInterval(sportTimer); keepAwake(false); closeSheet(); renderSportBar(); toast('Séance arrêtée'); return true;
+    case 'spQuit': sportRun = null; delete state.sportLive; save(); syncSoon(); clearInterval(sportTimer); keepAwake(false); closeSheet(); renderSportBar(); toast('Séance arrêtée'); return true;
     case 'spSkip': if (r) { r.step = 'set'; sportPaint(); } return true;
     case 'spRest': if (r) { if (+v) r.t += +v; else r.step = 'set'; sportPaint(); } return true;
     case 'spRep': if (r) { r.cur = Math.max(0, (r.cur || 0) + +v); sportPaint(); } return true;
