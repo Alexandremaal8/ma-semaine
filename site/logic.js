@@ -124,7 +124,7 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 11, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 12, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -219,13 +219,17 @@ function normalize(s) {
     const prog = (out.subjects || []).find(x => x.id === 'prog' || /programm/i.test(x.name));
     if (prog && prog.exam === '2026-11-25' && !(out.projects || []).length) {
       prog.exam = '';
-      out.projects = [{ id: uid(), subj: prog.id, title: 'Mini-projet 2', from: '2026-11-25', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
+      out.projects = [{ id: uid(), subj: prog.id, title: 'Mini-projet 2', from: '2026-11-09', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
     }
   }
   if ((old.v || 0) < 11) {
     // v10 → v11: the prog course also has a real exam, Saturday 12 Dec (besides Mini-projet 2)
     const prog = (out.subjects || []).find(x => x.id === 'prog' || /programm/i.test(x.name));
     if (prog && !prog.exam) prog.exam = '2026-12-12';
+  }
+  if ((old.v || 0) < 12) {
+    // v11 → v12: Mini-projet 2 already started (tutorial 1 due this week): its hours spread from now
+    for (const p of out.projects || []) if (/mini-?projet\s*2/i.test(p.title) && p.from === '2026-11-25') p.from = '2026-11-09';
   }
   out.modes = Object.assign({}, clone(MODE_DEFAULTS), out.modes || {});
   for (const k of MODE_ORDER) out.modes[k] = Object.assign({}, MODE_DEFAULTS[k], out.modes[k] || {});
@@ -242,7 +246,7 @@ function normalize(s) {
   const cutoff = iso(addDays(mondayOf(new Date()), -7 * 20));
   for (const k of ['done', 'frozen', 'weekModes', 'autoModes', 'serieDone', 'rolled', 'asked', 'serieEst', 'serieAi', 'serieProg', 'corrMan'])
     if (out[k] && typeof out[k] === 'object') for (const wk of Object.keys(out[k])) if (/^\d{4}-\d{2}-\d{2}$/.test(wk) && wk < cutoff) delete out[k][wk];
-  out.v = 11;
+  out.v = 12;
   return out;
 }
 
@@ -387,6 +391,20 @@ function layoutDay(S, m, weekStart, d) {
   const wind = sleep - 30;
   ev.push({ kind: 'rest', start: wind, end: sleep, title: 'Écrans off, routine du soir' });
   for (const s of [1140, 1155, 1170, 1185, 1200, 1110, 1095]) if (s + 45 <= wind && free(s, s + 45)) { ev.push({ kind: 'meal', start: s, end: s + 45, title: 'Souper' }); break; }
+  // your own plan for the day: your blocks in your order from the time you said, around meals and chores;
+  // the app adds nothing else of its own after that time
+  const plan = (S.dayPlans || {})[dIso];
+  let planFrom = null;
+  if (plan && Array.isArray(plan.items) && plan.items.length && plan.from != null) {
+    planFrom = Math.min(plan.from, plan.at != null ? plan.at : plan.from); let t = plan.from;   // nothing of the app's own from the moment you made it
+    plan.items.forEach((it, i) => {
+      const len = Math.max(10, Math.min(300, Math.round(+it.min || 30)));
+      while (t + 10 <= sleep && !free(t, t + len)) t += 5;
+      if (t + len > sleep) return;
+      ev.push({ kind: 'fixed', plan: true, movable: true, start: t, end: t + len, title: String(it.title || 'Étude').slice(0, 80), subj: subjOf(S, it.subj) ? it.subj : null, planKind: it.kind || 'study' });
+      t += len + 10;
+    });
+  }
   const eveStart = Math.max(wake + 35, wind - m.freeEve);
   // catch-up window: the first part of the free evening, never below MIN_FREE_EVE of real free time
   const extEnd = Math.min(eveStart + (+m.ext || 0), wind - MIN_FREE_EVE);
@@ -396,8 +414,8 @@ function layoutDay(S, m, weekStart, d) {
     if (hi > t) out.push({ s: t, e: hi });
     return out;
   };
-  const gaps = off ? [] : gapsIn(wake + 35, eveStart);
-  const extGaps = off || extEnd <= eveStart ? [] : gapsIn(eveStart, extEnd);
+  const gaps = off ? [] : gapsIn(wake + 35, planFrom != null ? Math.min(eveStart, planFrom) : eveStart);
+  const extGaps = off || extEnd <= eveStart || planFrom != null ? [] : gapsIn(eveStart, extEnd);
   const chunk = (gs, limit) => {
     const res = []; let left = limit;
     for (const g of gs) {
@@ -414,7 +432,7 @@ function layoutDay(S, m, weekStart, d) {
     return res;
   };
   const cap = chunk(gaps, Infinity).reduce((a, x) => a + x.len, 0);
-  return { d, date, dIso, we, off, wake, sleep, wind, eveStart, ev, courses, firstC, goHome, gaps, extGaps, chunk, cap };
+  return { d, date, dIso, we, off, wake, sleep, wind, eveStart, ev, courses, firstC, goHome, gaps, extGaps, chunk, cap, planAt: planFrom };
 }
 
 /* ---------- requirements for the week ---------- */
@@ -579,7 +597,7 @@ function generate(S0, weekStart, now) {
     let prev = 0, soloNow = 0;
     for (const [wk, recs] of Object.entries(S.done || {})) for (const v of Object.values(recs || {})) {
       if (!v || typeof v !== 'object' || !String(v.t || '').startsWith(p.title)) continue;
-      if (wk < key) prev += v.m || 0; else if (wk === key && v.t === p.title) soloNow += v.m || 0;
+      if (wk < key) prev += v.m || 0; else if (wk === key) soloNow += v.m || 0;
     }
     const weeksLeft = Math.max(1, Math.round((mondayOf(pt) - weekStart) / (7 * 864e5)) + 1);
     let meet = 0; for (const x of days) for (const e of x.ev) if (e.pid === p.id) meet += e.end - e.start;
@@ -824,6 +842,7 @@ function generate(S0, weekStart, now) {
     }
     else if (endT <= nowT) { e.state = endT <= sinceT ? 'pre' : 'missed'; }
     else e.state = 'todo';
+    if (e.plan) { e.serie = e.planKind === 'serie'; e.corr = e.planKind === 'corr'; e.sub = [su ? su.name : '', 'ton plan'].filter(Boolean).join(' · '); }
     if (e.exo) {
       e.serie = true; e.title = (wkN ? 'Série ' + wkN : 'Série') + ' · séance d’exercices';
       // a session missed: its part of the série goes back to the blocks ahead; a partial one counts for what was done
@@ -850,6 +869,7 @@ function generate(S0, weekStart, now) {
     const id = idOf(f.d, f), rec = doneMap[id];
     if (rec && typeof rec === 'object') live.push(Object.assign({}, f, rec.focus && rec.rs != null && rec.m ? realTimes(f, rec) : {}, { id, title: rec.t || f.title, subj: rec.s, state: 'done', part: rec.p }));
     else if (dropped(f)) continue;
+    else if (days[f.d] && days[f.d].planAt != null && f.end > days[f.d].planAt) continue;   // your plan replaces it
     else if (f.endT <= nowT && underRun(f)) live.push(Object.assign({}, f, { id, state: 'todo', underRun: true }));
     else if (f.endT <= nowT) { const pre = f.endT <= sinceT; if (!pre) lateMin += f.len; live.push(Object.assign({}, f, { id, state: pre ? 'pre' : 'missed' })); }
     else {
@@ -861,6 +881,8 @@ function generate(S0, weekStart, now) {
   }
   slots.forEach((s, i) => {
     const id = idOf(s.d, s), rec = doneMap[id];
+    // the app's own block that was under way when you wrote your plan: your plan replaces it
+    const pa = days[s.d] && days[s.d].planAt; if (pa != null && !rec && s.end >= pa && s.start < pa) return;
     const b = base[i];
     // a block done keeps the length it had when ticked (a slot can have been cut for a weekly task since)
     const recLen = rec && typeof rec === 'object' && rec.m ? Math.round(rec.p ? rec.m / rec.p : rec.m) : 0;

@@ -25,7 +25,7 @@ console.log('weekly OK');
   const old = L.defaultState(); old.v = 9; delete old.projects; old.subjects.find(x => x.id === 'prog').exam = '2026-11-25';
   const S2 = L.normalize(JSON.parse(JSON.stringify(old))); S2.since = new Date(2026, 10, 1).getTime();
   assert.equal(S2.subjects.find(x => x.id === 'prog').exam, '2026-12-12', 'v11: the real prog exam of 12 Dec');
-  assert.deepEqual(S2.projects.map(p => [p.title, p.from, p.to]), [['Mini-projet 2', '2026-11-25', '2026-12-17']]);
+  assert.deepEqual(S2.projects.map(p => [p.title, p.from, p.to]), [['Mini-projet 2', '2026-11-09', '2026-12-17']]);
   S2.projects[0].sessions = [{ date: '2026-11-27', start: 975, end: 1080, weekly: true }];
   let total = 0;
   for (const w of [new Date(2026, 10, 23), new Date(2026, 10, 30), new Date(2026, 11, 7), new Date(2026, 11, 14), new Date(2026, 11, 21)]) {
@@ -34,7 +34,7 @@ console.log('weekly OK');
     assert.equal(g.meta.mustLeftAfter, 0, 'séries still fit in week ' + key);
     S2.done[key] = {};
     for (const x of g) for (const e of x.ev) if (/Mini-projet/.test(e.title)) {
-      assert.ok(x.date >= new Date(2026, 10, 25) && x.date <= new Date(2026, 11, 17), 'inside the project dates');
+      assert.ok(x.date >= new Date(2026, 10, 9) && x.date <= new Date(2026, 11, 17), 'inside the project dates');
       S2.done[key][e.id] = { t: e.title, s: 'prog', m: e.end - e.start }; total += e.end - e.start;
     }
     if (key === '2026-11-23') assert.ok(g[4].ev.some(e => e.fixed && /binôme/.test(e.title) && e.start === 975), 'Friday session');

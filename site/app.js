@@ -631,7 +631,8 @@ function renderToday() {
   const blNote = isToday && blT >= 15 ? `<div class="notice"><span><b>Retard : ${hm(blT)}</b> · ${hm(M.blPlaced)} prévus cette semaine.</span><button type="button" data-tab-go="bl">Voir</button></div>` : '';
   const prop = thisWeek ? proposal(ws, key, M, wmode) : '';
   const news = isToday && APP === 'main' && !(state.dismiss || {})['news-focus'] ? `<div class="news"><b>Nouveau : Focus et Sport</b><p><b>Focus</b> : touche ▶ sur un bloc, le chrono tourne (même app fermée) et le vrai temps recale ton planning. Pomodoro en option, stats dans Ma semaine.<br><b>Sport</b> : ta prochaine séance, tes progrès exercice par exercice, tes records et l’historique.<br>Les deux peuvent avoir leur propre icône sur l’écran d’accueil.</p><div class="btns" style="padding:0"><button type="button" class="btn pri" data-tab-go="focus">Ouvrir Focus</button><button type="button" class="btn" data-tab-go="sport">Sport</button><button type="button" class="btn" data-act="icons">Icônes</button><button type="button" class="btn" data-act="dismiss" data-v="news-focus">OK</button></div></div>` : '';
-  $('#todayBody').innerHTML = `${pickWeek}${hero}${news}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}<div class="tl">${rows.join('')}</div>
+  const myPlan = isToday && APP === 'main' ? `<div class="md-links" style="margin:2px 0 10px"><button type="button" class="linkbtn mini" data-act="dayPlan">${(state.dayPlans || {})[todayIso()] ? '✎ Ton plan du jour' : '✎ Faire mon propre plan pour aujourd’hui'}</button></div>` : '';
+  $('#todayBody').innerHTML = `${pickWeek}${hero}${news}${prop}${late}${prop ? '' : advice}${blNote}${notice}${prog}${myPlan}<div class="tl">${rows.join('')}</div>
     <div class="endday">Au lit ${fmt(day.sleep)}</div>
     ${isToday ? mdFeedCard() + mdTodayCard() : ''}
     <div class="day-actions">${day.trip ? '' : `<button type="button" class="linkbtn" data-act="offDay" data-v="${selDate}">${day.off ? 'Annuler le jour off' : 'Prendre ce jour off'}</button>`}<button type="button" class="linkbtn" data-act="weekSheet">Bilan de la semaine</button></div>`;
@@ -680,7 +681,7 @@ function ciCandidates() {
     const ws = addDays(mondayOf(new Date()), k), wk = iso(ws), asked = (state.asked || {})[wk] || {};
     if (ws.getTime() + 7 * 864e5 < (state.since || 0)) continue;
     for (const x of L.generate(state, ws)) for (const e of x.ev) {
-      if (e.kind !== 'study' || e.state !== 'missed' || asked[e.id] || (state.chronoTruth !== false && !e.fixed)) continue;
+      if (e.kind !== 'study' || e.state !== 'missed' || asked[e.id] || (state.chronoTruth !== false && (!e.fixed || e.plan))) continue;
       const endT = x.date.getTime() + e.end * 6e4, startT = x.date.getTime() + e.start * 6e4;
       if (nowT - endT > 36 * 3600e3) continue;
       // you ran a chrono on something else during it: you chose to skip it, no need to ask
@@ -989,11 +990,20 @@ function mdBlockLinks(e, wk) {
   const f = mdFileFor(e, wk); if (f) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(f.file)}">${e.corr ? 'Ouvrir le corrigé' : 'Ouvrir la série'}</button>`);
   if (e.corr) { const sf = mdPick(e.subj, 'serie', n, wk); if (sf) out.push(`<button type="button" class="linkbtn mini" data-act="mdOpen" data-v="${esc(sf.file)}">Énoncé</button>`); }
   const study = e.kind === 'study' || e.kind === 'course';
+  const pr = study && (state.projects || []).find(p => p.subj === e.subj && String(e.title || '').startsWith(p.title));
+  if (pr && projFiles(pr).length) out.push(`<button type="button" class="linkbtn mini" data-act="mdDocs" data-v="${esc(e.subj)}" data-pid="${esc(pr.id)}">Documents du ${esc(pr.title)}</button>`);
   if (study && mdFiles(e.subj).length && (!f || e.kind === 'course' || !(e.serie || e.corr))) out.push(`<button type="button" class="linkbtn mini" data-act="mdDocs" data-v="${esc(e.subj)}">Documents du cours</button>`);
   return estLine + (out.length ? `<div class="md-links">${out.join('')}</div>` : '');
 }
-function mdDocsSheet(subj) {
-  const su = subjOf(state, subj), fs = mdFiles(subj);
+// files of a project (mini-projet 2: statement, tutorials…): matched by its name and number
+const projRe = p => { const m = /(\d+)\s*$/.exec(p.title), base = p.title.replace(/\s*\d+\s*$/, '').replace(/[-\s]+/g, '[-\\s]*'); return new RegExp(base + (m ? '[-\\s_]*' + m[1] + '(?!\\d)' : '') + '|tutori|tutorial|projet', 'i'); };
+function projFiles(p) {
+  const re = projRe(p), other = /mini[-\s_]*projet[-\s_]*(\d+)/i, num = (/(\d+)\s*$/.exec(p.title) || [])[1];
+  return mdFiles(p.subj).filter(i => { const t = (i.title || '') + ' ' + (i.section || ''); const o = other.exec(t); if (o && num && o[1] !== num) return false; return re.test(t); });
+}
+function mdDocsSheet(subj, pid) {
+  const pr = pid ? (state.projects || []).find(p => p.id === pid) : null;
+  const su = subjOf(state, subj), fs = pr ? projFiles(pr) : mdFiles(subj);
   if (!fs.length) { toast('Aucun document trouvé pour ce cours'); return; }
   const lbl = { serie: 'Série', correction: 'Corrigé', exam: 'Examen' };
   const rows = fs.slice(0, 80).map(i => { const nm = mdName(i), orig = i.title !== nm; return `<div class="li doc"><button type="button" class="doc-open" data-act="mdOpen" data-v="${esc(i.file)}"><span class="bd"><span class="ti">${lbl[i.kind] && !deacc(nm).startsWith(deacc(lbl[i.kind])) ? `<span class="tag cu" style="margin:0 6px 0 0">${lbl[i.kind]}</span>` : ''}${esc(nm)}</span><span class="su">${esc(i.section || '')}${i.section ? ' · ' : ''}${dateLbl(new Date(i.time))}${orig ? ' · <i>' + esc(i.title) + '</i>' : ''}</span></span></button><button type="button" class="doc-ren" data-act="mdRename" data-v="${esc(i.file)}" data-s="${esc(subj)}" aria-label="Renommer">✎</button></div>`; }).join('');
@@ -1102,7 +1112,7 @@ function mdAction(a, v, b) {
     if (a === 'maCancel') { state.cancel = state.cancel || []; state.cancel.push({ date: p.date, subj, type: p.type || '' }); }
     done(); return true;
   }
-  if (a === 'mdDocs') { mdDocsSheet(v); return true; }
+  if (a === 'mdDocs') { mdDocsSheet(v, b.dataset.pid); return true; }
   if (a === 'mdRename') { mdRename(v, b.dataset.s); return true; }
   if (a === 'mdDocsPick') { mdDocsPick(); return true; }
   if (a === 'mdCopyLaunch') { copyText('https://moodle.epfl.ch/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=https', 'Lien copié : colle-le dans Safari'); return true; }
@@ -1385,6 +1395,50 @@ function backfillRealStarts() {
   }
   return n;
 }
+// ——— your own plan for the day, written as lines ("1h30 · Analyse · révision du blanc") ———
+const SUBJ_WORDS = [[/\b(analyse|ana)\b/i, 'ana'], [/\b(physique|phys?|méca)/i, 'phy'], [/\b(alg[eè]bre|alg)\b/i, 'alg'], [/\b(a?icc)\b/i, 'aicc'], [/\b(prog|programmation|java|mini-?projet|tutoriel|mooc)/i, 'prog']];
+function parsePlan(text, defFrom) {
+  let from = defFrom; const items = [];
+  for (let line of String(text || '').split(/\n+/)) {
+    line = line.trim(); if (!line) continue;
+    const st = /^(d[ée]but|start|[àa] partir de|from)\D*(\d{1,2})\s*[h:]\s*(\d{2})?/i.exec(line);
+    if (st) { from = +st[2] * 60 + (+st[3] || 0); continue; }
+    let min = 0; const h = /(\d+)\s*h\s*(\d{1,2})?/i.exec(line), mi = /(\d+)\s*min/i.exec(line);
+    if (h) min = +h[1] * 60 + (+h[2] || 0); else if (mi) min = +mi[1];
+    let title = line.replace(/(\d+)\s*h\s*(\d{1,2})?|(\d+)\s*min(utes?)?/i, '').replace(/^[\s·:\-–—•*]+|[\s·:\-–—•]+$/g, '').replace(/\s*·\s*·\s*/g, ' · ');
+    let subj = null; for (const [re, id] of SUBJ_WORDS) if (re.test(title) && subjOf(state, id)) { subj = id; break; }
+    if (subj) { const su = subjOf(state, subj); title = title.replace(new RegExp('^\\s*' + su.name.split(/[ (]/)[0] + '[^·:]*[·:]\\s*', 'i'), '').trim() || title; }
+    const kind = /correct|corrig/i.test(title) ? 'corr' : /mini-?projet|tutoriel|projet/i.test(title) ? 'proj' : /blanc|r[ée]vis|revoir|relire|reprendre|fiche/i.test(title) ? 'rev' : /s[ée]rie|exo/i.test(title) ? 'serie' : 'study';
+    // project work counts for the project when its name starts the title
+    const pr = kind === 'proj' && (state.projects || []).find(p => (!subj || p.subj === subj) && (!p.to || p.to >= todayIso()));
+    if (pr && !title.toLowerCase().startsWith(pr.title.toLowerCase())) title = pr.title + ' · ' + title.replace(new RegExp(pr.title, 'i'), '').replace(/^[\s·:\-]+/, '');
+    items.push({ title: title.charAt(0).toUpperCase() + title.slice(1), subj: subj || (pr && pr.subj) || null, min: min || 45, kind });
+  }
+  return { from, items };
+}
+function planSheet() {
+  const today = todayIso(), cur = (state.dayPlans || {})[today];
+  const n = new Date(), nowMin = Math.ceil((n.getHours() * 60 + n.getMinutes()) / 5) * 5;
+  const txt = cur ? [`début ${fmt(cur.from)}`].concat(cur.items.map(it => `${hm(it.min)} · ${(subjOf(state, it.subj) || {}).name || ''} · ${it.title}`)).join('\n') : `début ${fmt(nowMin + 15)}\n`;
+  openSheet('Ton plan du jour', `<p class="hint" style="margin:0 0 10px;padding:0">Une ligne par bloc, dans ton ordre : durée · matière · quoi. L’app les place à la suite à partir de l’heure de début, autour des repas et des tâches, et n’ajoute rien d’autre après. Le chrono, les décalages et le reste marchent pareil.</p>
+    <textarea name="plan" id="f-plan" rows="9" style="width:100%;box-sizing:border-box;font:inherit;font-size:15px;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink)" placeholder="début 14:45&#10;1h30 · Analyse · révision du blanc&#10;45min · Physique · dernier exo série 9">${esc(txt)}</textarea>
+    <div id="planPrev" class="su" style="margin-top:8px"></div>
+    <div class="sh-actions">${cur ? '<button type="submit" class="btn" value="clear">Effacer mon plan</button>' : ''}<button type="submit" class="btn pri" value="save">Mettre dans ma journée</button></div>`, (fd, btn) => {
+    state.dayPlans = state.dayPlans || {};
+    if (btn && btn.value === 'clear') { delete state.dayPlans[today]; return done(); }
+    const p = parsePlan(fd.plan, nowMin + 15);
+    if (!p.items.length) { toast('Écris au moins une ligne'); return false; }
+    for (const k of Object.keys(state.dayPlans)) if (k < iso(addDays(new Date(), -14))) delete state.dayPlans[k];
+    p.at = cur && cur.at != null ? Math.min(cur.at, nowMin) : nowMin; state.dayPlans[today] = p; done();
+    const g = L.generate(state, mondayOf(new Date()), new Date()), d = (new Date().getDay() + 6) % 7;
+    const inDay = g[d].ev.filter(e => e.plan).map(e => e.title), out = p.items.filter(it => !inDay.includes(it.title.slice(0, 80)));
+    setTimeout(() => toast(out.length ? `Ne rentre pas avant ce soir : ${out.map(x => x.title).join(', ')}` : 'Ton plan est dans ta journée'), 400);
+    return true;
+  });
+  const ta = $('#f-plan'), pv = $('#planPrev');
+  const show = () => { const p = parsePlan(ta.value, nowMin + 15); pv.innerHTML = p.items.length ? `À partir de <b>${fmt(p.from)}</b> : ` + p.items.map(it => `${esc(it.title)} <span style="color:var(--muted)">(${hm(it.min)}${it.subj ? ', ' + esc(subjOf(state, it.subj).name) : ''})</span>`).join(' → ') : ''; };
+  ta.addEventListener('input', show); show();
+}
 function foSwapSlot(fb, wk) {
   const e = fb.e, now = new Date();
   if (!e || e.fixed || e.kind !== 'study' || e.state === 'done' || wk !== iso(mondayOf(now))) return null;
@@ -1415,7 +1469,7 @@ function foStop(finished, after) {
     } else if (fb && !d[r.id]) {
       const ev = fb.e, plan = ev.end - ev.start;
       revRemember(wk, r.id, finished ? null : Math.min(.95, min / plan)); examRemember(wk, r.id, finished ? null : Math.min(.95, min / plan));
-      d[r.id] = { s: ev.subj, t: ev.title, m: min, d: fb.x.d, a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined, focus: true };
+      d[r.id] = { s: ev.subj, t: ev.title, m: min, d: fb.x.d, a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed && !ev.plan, b: ev.bl || undefined, focus: true };
       const rs = realStart(r, fb.x.date); if (rs != null) d[r.id].rs = rs;
       if (!finished) d[r.id].p = Math.max(.05, Math.min(.95, min / plan));
     } else if (!r.id && r.subj) {
@@ -2161,6 +2215,7 @@ document.addEventListener('click', async e => {
     case 'roomAdd': roomSheet(v); return;
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'exDocs': exDocsSheet(v, b.dataset.w); return;
+    case 'dayPlan': planSheet(); return;
     case 'winterExams': { beginChange(); for (const x of WINTER) { const su = subjOf(state, x.subj); if (su) Object.assign(su, { exam: x.date, examStart: x.s, examEnd: x.e, examRoom: x.room }); } (state.dismiss = state.dismiss || {})['winter27'] = 1; save(); renderAll(); endChange('Session d’hiver ajoutée', '4 examens du 11 au 22 janvier. La campagne de révision démarre 6 semaines avant chacun.'); return; }
     case 'mockReady': { beginChange(); const mk = (state.mocks || []).find(x => x.id === v); if (mk) mk.ready = true; save(); renderAll(); endChange('Révisions du blanc terminées', 'Les blocs de révision restants pour ce blanc sont retirés, cochés ou pas.'); return; }
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); state.corrMan = state.corrMan || {}; (state.corrMan[wk] = state.corrMan[wk] || {})[v] = 1; done(); return; }
@@ -2175,7 +2230,7 @@ document.addEventListener('click', async e => {
         const days = L.generate(state, fromIso(wk)); let ev = null;
         for (const x of days) { ev = x.ev.find(e => e.id === v); if (ev) break; }
         if (!ev) return;
-        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
+        d[v] = ev.kind === 'study' ? { s: ev.subj, t: ev.title, m: ev.end - ev.start, d: +v.split('-')[0], a: ev.start, serie: ev.serie, c: !!ev.corr || undefined, fx: !!ev.fixed && !ev.plan, b: ev.bl || undefined } : { k: ev.kind, m: ev.end - ev.start };
         if (ev.kind === 'sport') { const rec = d[v]; delete d[v]; const wi = sportWorkoutOf(wk, v); d[v] = rec; d[v].w = SP.workouts[wi].id; state.sportNext = (wi + 1) % SP.workouts.length; }
         b.setAttribute('aria-pressed', 'true'); b.classList.add('pop');
       }
