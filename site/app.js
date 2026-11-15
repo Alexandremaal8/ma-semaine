@@ -1988,7 +1988,13 @@ function renderBacklog() {
     summary = `<div class="hero"><div class="k">À rattraper</div><div class="t">${hm(total)}</div><div class="s">${allIn ? 'Tout est casé cette semaine' + (lastBl ? ', fini d’ici ' + DAYS[dow(lastBl.d)].toLowerCase() : '') + '.' : hm(M.blPlaced) + ' cette semaine (max ' + hm(state.modes[M.cfg.mode].bl) + ' par jour en mode ' + MODE_META[M.cfg.mode].name + '), le reste ensuite.'}</div>
       <div class="bar"><i style="width:${total ? Math.min(100, M.blPlaced / total * 100) : 0}%"></i></div></div>`;
   }
-  const week = M.lateMin >= 15 ? `<div class="notice"><span><b>Cette semaine : ${hm(M.lateMin)} pas faits</b>, déjà replacés dans ta semaine. Ce qui ne sera pas fait dimanche soir arrivera ici.</span></div>` : '';
+  // this week's séries still open: what will land here Monday if nothing more is done, and a way to say where you are
+  const proj = L.generate(state, ws, new Date(addDays(ws, 7).getTime() - 1000)).meta.unfinished || {}, wkN = L.semWeek(state, ws), wkKey = iso(ws);
+  const openS = Object.entries(proj).filter(([k, u]) => u.left - u.corr >= 15 && subjOf(state, k));
+  const week = (M.lateMin >= 15 ? `<div class="notice"><span><b>Cette semaine : ${hm(M.lateMin)} pas faits</b>, déjà replacés dans ta semaine. Ce qui ne sera pas fait dimanche soir arrivera ici.</span></div>` : '')
+    + (openS.length ? `<div class="sec-t">Séries de cette semaine pas encore finies</div><div class="group">${openS.map(([k, u]) => { const su = subjOf(state, k), pr = ((state.serieProg || {})[wkKey] || {})[k];
+        return `<div class="li" style="--c:${esc(su.color)}"><span class="dt"></span><span class="bd"><span class="ti">Série ${wkN || ''} · ${esc(su.name)}</span><span class="su">${pr ? 'exo ' + Math.min(pr.k + 1, pr.n) + '/' + pr.n + ' · ' : ''}reste ≈ ${hm(Math.round((u.left - u.corr) / 5) * 5)} · arrive ici lundi si pas finie</span></span><button type="button" class="linkbtn mini" data-act="foSerieC" data-w="${wkKey}" data-v="${esc(k)}">Où j’en suis</button></div>`; }).join('')}</div>
+      <p class="hint" style="margin:6px 0 12px">Le reste est estimé au temps passé. Dis où tu en es pour que ce soit exact (ou « Série finie ✓ »).</p>` : '');
   const manual = state.blOrder === 'manual';
   const rows = open.map((x, idx) => {
     const su = subjOf(state, x.subj), nx = M.blNext[x.id];
