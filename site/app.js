@@ -1990,10 +1990,12 @@ function renderBacklog() {
   }
   // this week's séries still open: what will land here Monday if nothing more is done, and a way to say where you are
   const proj = L.generate(state, ws, new Date(addDays(ws, 7).getTime() - 1000)).meta.unfinished || {}, wkN = L.semWeek(state, ws), wkKey = iso(ws);
-  const openS = Object.entries(proj).filter(([k, u]) => u.left - u.corr >= 15 && subjOf(state, k));
+  // every série not ticked this week, even the ones whose planned time is already spent (the time doesn't say it's finished)
+  const ticked = (state.serieDone || {})[wkKey] || {};
+  const openS = L.generate(state, ws).meta.cfg.coursesOn === false ? [] : state.subjects.filter(su => su.serie && !ticked[su.id]).map(su => [su.id, proj[su.id] || { left: 0, corr: 0 }]);
   const week = (M.lateMin >= 15 ? `<div class="notice"><span><b>Cette semaine : ${hm(M.lateMin)} pas faits</b>, déjà replacés dans ta semaine. Ce qui ne sera pas fait dimanche soir arrivera ici.</span></div>` : '')
     + (openS.length ? `<div class="sec-t">Séries de cette semaine pas encore finies</div><div class="group">${openS.map(([k, u]) => { const su = subjOf(state, k), pr = ((state.serieProg || {})[wkKey] || {})[k];
-        return `<div class="li" style="--c:${esc(su.color)}"><span class="dt"></span><span class="bd"><span class="ti">Série ${wkN || ''} · ${esc(su.name)}</span><span class="su">${pr ? 'exo ' + Math.min(pr.k + 1, pr.n) + '/' + pr.n + ' · ' : ''}reste ≈ ${hm(Math.round((u.left - u.corr) / 5) * 5)} · arrive ici lundi si pas finie</span></span><button type="button" class="linkbtn mini" data-act="foSerieC" data-w="${wkKey}" data-v="${esc(k)}">Où j’en suis</button></div>`; }).join('')}</div>
+        return `<div class="li" style="--c:${esc(su.color)}"><span class="dt"></span><span class="bd"><span class="ti">Série ${wkN || ''} · ${esc(su.name)}</span><span class="su">${pr ? 'exo ' + Math.min(pr.k + 1, pr.n) + '/' + pr.n + ' · ' : ''}${u.left - u.corr >= 15 ? 'reste ≈ ' + hm(Math.round((u.left - u.corr) / 5) * 5) + ' · arrive ici lundi si pas finie' : 'temps prévu fait, mais pas cochée : dis où tu en es'}</span></span><button type="button" class="linkbtn mini" data-act="foSerieC" data-w="${wkKey}" data-v="${esc(k)}">Où j’en suis</button></div>`; }).join('')}</div>
       <p class="hint" style="margin:6px 0 12px">Le reste est estimé au temps passé. Dis où tu en es pour que ce soit exact (ou « Série finie ✓ »).</p>` : '');
   const manual = state.blOrder === 'manual';
   const rows = open.map((x, idx) => {
