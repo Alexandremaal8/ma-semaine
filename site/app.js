@@ -1585,6 +1585,7 @@ function serieSheet(sc, fo) {
     const apply = () => {
       const res = L.serieReport(state, fromIso(sc.wk), sc.subj, k, n, sc.per);
       if (!res) return '';
+      if (sc.after) sc.after(res);
       if (res.done) return `Série ${sc.num || ''} finie en ${hm(Math.round(res.spent))} 🎉 Il reste la correction.`;
       return `Exo ${k + 1} sur ${n}${res.pace ? ' · ton rythme ≈ ' + hm(Math.round(res.pace)) + ' par exo' : ''} · il reste ≈ ${hm(res.rem)} pour finir, ton planning est recalé.`;
     };
@@ -2007,6 +2008,7 @@ function renderBacklog() {
       <button type="button" class="bd" data-act="editBacklog" data-v="${esc(x.id)}"><span class="ti">${esc(x.title)}${x.urgent ? '<span class="tag">urgent</span>' : ''}${x.auto ? '<span class="tag cu">auto</span>' : ''}</span><span class="su">${esc(su ? su.name : '')} · ${info}</span>${!manual && x.why ? `<span class="why">Priorité : ${esc(x.why)}</span>` : ''}</button>
       ${manual ? `<span class="arrows"><button type="button" data-act="blUp" data-v="${esc(x.id)}" aria-label="Monter" ${idx === 0 ? 'disabled' : ''}>▲</button><button type="button" data-act="blDown" data-v="${esc(x.id)}" aria-label="Descendre" ${idx === open.length - 1 ? 'disabled' : ''}>▼</button></span>` : ''}
       ${x.left < 15 ? `<button type="button" class="more" data-act="blMore" data-v="${esc(x.id)}">+30 min</button>` : ''}
+      ${x.auto && /^V[ée]rifier la s[ée]rie/i.test(x.title) ? `<button type="button" class="more" data-act="blNotDone" data-v="${esc(x.id)}">Série pas finie ?</button>` : ''}
     </div>`;
   }).join('');
   const recent = (state.backlog || []).filter(x => x.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 6);
@@ -2224,6 +2226,19 @@ document.addEventListener('click', async e => {
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'exDocs': exDocsSheet(v, b.dataset.w); return;
     case 'dayPlan': planSheet(); return;
+    case 'blNotDone': {
+      const it = (state.backlog || []).find(x => x.id === v); if (!it) return;
+      const wk = iso(mondayOf(new Date((it.created || Date.now()) - 864e5)));
+      const sc = serieCtx({ kind: 'study', subj: it.subj, serie: true, title: 'Série' }, wk); if (!sc) return;
+      const corr = Math.min(30, it.minutes || 30);
+      sc.after = res => {
+        // the late item becomes "série + correction" with what is really left
+        const n = sc.num || L.semWeek(state, fromIso(wk));
+        it.title = res.done ? it.title : (n ? 'Série ' + n : 'Série') + ' + correction';
+        it.minutes = res.done ? corr : Math.round((res.rem + corr) / 5) * 5 + L.backlogCredit(state, it.id);
+      };
+      serieSheet(sc, null); return;
+    }
     case 'winterExams': { beginChange(); for (const x of WINTER) { const su = subjOf(state, x.subj); if (su) Object.assign(su, { exam: x.date, examStart: x.s, examEnd: x.e, examRoom: x.room }); } (state.dismiss = state.dismiss || {})['winter27'] = 1; save(); renderAll(); endChange('Session d’hiver ajoutée', '4 examens du 11 au 22 janvier. La campagne de révision démarre 6 semaines avant chacun.'); return; }
     case 'mockReady': { beginChange(); const mk = (state.mocks || []).find(x => x.id === v); if (mk) mk.ready = true; save(); renderAll(); endChange('Révisions du blanc terminées', 'Les blocs de révision restants pour ce blanc sont retirés, cochés ou pas.'); return; }
     case 'corrNow': { beginChange(); const wk = b.dataset.w; state.corrSeen = state.corrSeen || {}; (state.corrSeen[wk] = state.corrSeen[wk] || {})[v] = todayIso(); state.corrMan = state.corrMan || {}; (state.corrMan[wk] = state.corrMan[wk] || {})[v] = 1; done(); return; }
