@@ -124,7 +124,7 @@ function defaultState() {
   const C = (day, s, e, subj, type, room) => ({ id: uid(), day, start: s, end: e, subj, type, room: room || '' });
   const R = (day, s, e, title, kind, subj) => ({ id: uid(), day, start: s, end: e, title, kind: kind || 'other', subj: subj || '' });
   return {
-    v: 12, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
+    v: 13, semEnd: '2026-12-18', semStart: '2026-09-14', blOrder: 'auto', mode: 'normal', coursesOn: true, since: Date.now(),
     wake: 390, sleep: 1380, wakeWE: 510, sleepSat: 1440,
     subjects: [
       { id: 'ana', name: 'Analyse I', color: '#C2410C', prio: 3, exam: '', serie: 180, corr: 30 },
@@ -219,7 +219,7 @@ function normalize(s) {
     const prog = (out.subjects || []).find(x => x.id === 'prog' || /programm/i.test(x.name));
     if (prog && prog.exam === '2026-11-25' && !(out.projects || []).length) {
       prog.exam = '';
-      out.projects = [{ id: uid(), subj: prog.id, title: 'Mini-projet 2', from: '2026-11-09', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
+      out.projects = [{ id: uid(), subj: prog.id, title: 'Mini-projet 2', from: '2026-11-09', main: '2026-11-25', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
     }
   }
   if ((old.v || 0) < 11) {
@@ -230,6 +230,10 @@ function normalize(s) {
   if ((old.v || 0) < 12) {
     // v11 → v12: Mini-projet 2 already started (tutorial 1 due this week): its hours spread from now
     for (const p of out.projects || []) if (/mini-?projet\s*2/i.test(p.title) && p.from === '2026-11-25') p.from = '2026-11-09';
+  }
+  if ((old.v || 0) < 13) {
+    // v12 → v13: Mini-projet 2 has a tutorial phase; the real project starts 25 Nov
+    for (const p of out.projects || []) if (/mini-?projet\s*2/i.test(p.title) && !p.main) p.main = '2026-11-25';
   }
   out.modes = Object.assign({}, clone(MODE_DEFAULTS), out.modes || {});
   for (const k of MODE_ORDER) out.modes[k] = Object.assign({}, MODE_DEFAULTS[k], out.modes[k] || {});
@@ -246,7 +250,7 @@ function normalize(s) {
   const cutoff = iso(addDays(mondayOf(new Date()), -7 * 20));
   for (const k of ['done', 'frozen', 'weekModes', 'autoModes', 'serieDone', 'rolled', 'asked', 'serieEst', 'serieAi', 'serieProg', 'corrMan'])
     if (out[k] && typeof out[k] === 'object') for (const wk of Object.keys(out[k])) if (/^\d{4}-\d{2}-\d{2}$/.test(wk) && wk < cutoff) delete out[k][wk];
-  out.v = 12;
+  out.v = 13;
   return out;
 }
 
@@ -599,9 +603,13 @@ function generate(S0, weekStart, now) {
       if (!v || typeof v !== 'object' || !String(v.t || '').startsWith(p.title)) continue;
       if (wk < key) prev += v.m || 0; else if (wk === key) soloNow += v.m || 0;
     }
+    // progressive: the hours left are shared over the weeks left, a light share during the tutorial phase
+    // (before p.main) and the full share once the real project starts
     const weeksLeft = Math.max(1, Math.round((mondayOf(pt) - weekStart) / (7 * 864e5)) + 1);
+    const wOf = ws => p.main && addDays(ws, 7) <= fromIso(p.main) ? .35 : 1;
+    let wSum = 0; for (let i = 0; i < weeksLeft; i++) wSum += wOf(addDays(weekStart, 7 * i));
     let meet = 0; for (const x of days) for (const e of x.ev) if (e.pid === p.id) meet += e.end - e.start;
-    const solo = Math.max(0, Math.round(Math.max(0, p.hours * 60 - prev) / weeksLeft - meet));
+    const solo = Math.max(0, Math.round(Math.max(0, p.hours * 60 - prev) * wOf(weekStart) / wSum - meet));
     return { pf, pt, we, solo, left: Math.max(0, solo - soloNow) };
   };
   const projExtra = S.mode === 'recup' ? 0 : Math.min(600, (S.projects || []).reduce((a, p) => { const n = projNeed(p); return a + (n ? n.solo : 0); }, 0));

@@ -223,17 +223,16 @@ function editProject(id) {
     ${F.text('title', 'Nom', p.title, 'full', 'ex. Mini-projet 2')}
     ${F.select('subj', 'Matière', subjOpts(), p.subj)}
     ${F.date('from', 'Début', p.from, '')}${F.date('to', 'À rendre le', p.to, '')}
+    ${F.date('main', 'Le vrai projet commence le (après les tutoriels, facultatif)', p.main || '', 'full')}
     ${F.num('hours', 'Heures de travail en tout (environ)', p.hours, 'min="1" max="200" step="1"', 'full')}
   </div>
   ${p.id ? `<div class="sec-t" style="margin:16px 0 6px">Séances en binôme<button type="button" data-act="editSession" data-v="${esc(p.id)}" data-i="-1">+ Séance</button></div><div class="group">${sess || '<div class="empty">Ajoute vos créneaux communs : ils sont bloqués dans ton planning et comptent dans les heures du projet.</div>'}</div>` : ''}
-  <p class="hint" style="margin-top:10px">L’app répartit les heures restantes jusqu’au rendu, chaque semaine, sans jamais prendre le temps de tes séries. Ce n’est pas un examen : pas de mode Exam pour ça.</p>${actions(!!p.id)}`, (fd, btn) => {
+  <p class="hint" style="margin-top:10px">Chaque semaine, l’app prend une part des heures qui restent jusqu’au rendu : petite pendant les tutoriels, pleine une fois le vrai projet commencé. Cocher un bloc fait juste avancer ; le reste est recalculé et réparti sur les semaines suivantes, sans jamais prendre le temps de tes séries.</p>${actions(!!p.id)}`, (fd, btn) => {
     const others = (state.projects || []).filter(x => x.id !== p.id);
     if (isDel(btn)) { state.projects = others; return done(); }
     if (!fd.from || !fd.to || fd.to < fd.from) { toast('Choisis un début et une date de rendu après le début'); return false; }
-    const obj = { id: p.id || uid(), subj: fd.subj, title: String(fd.title || '').trim() || 'Projet', from: fd.from, to: fd.to, hours: Math.max(1, +fd.hours || 10), group: true, sessions: p.sessions || [] };
+    const obj = { id: p.id || uid(), subj: fd.subj, title: String(fd.title || '').trim() || 'Projet', from: fd.from, to: fd.to, main: fd.main && fd.main > fd.from && fd.main < fd.to ? fd.main : undefined, hours: Math.max(1, +fd.hours || 10), group: true, sessions: p.sessions || [] };
     state.projects = others.concat([obj]);
-    const su = subjOf(state, obj.subj);
-    if (su && su.exam && su.exam >= obj.from && su.exam <= obj.to) su.exam = '';   // the project replaces a placeholder "exam" date
     const isNew = !p.id; done(); if (isNew) setTimeout(() => editProject(obj.id), 400); return true;
   });
 }
