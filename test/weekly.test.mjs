@@ -149,6 +149,18 @@ console.log('focus OK');
   assert.ok(all.filter(e => e.gear === 'câbles').every(e => /rowing|curl|élévations/i.test(e.name)), 'cables only for back, biceps, shoulders');
   assert.ok(!all.some(e => e.gear === 'table' || /table/i.test(e.name)), 'no table rows');
   assert.ok(all.filter(e => /curl/i.test(e.name)).length >= 2, 'biceps twice a rotation');
+  assert.ok(!all.some(e => /y-t-w/i.test(e.name)) && !all.some(e => e.levels.some(l => /enroule/i.test(l[1]))), 'no Y-T-W, no wrapping cables around the hand');
+  {
+    const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+    const bagI = L.SPORT.workouts.findIndex(w => w.bag);
+    for (let wk = 0; wk < 3; wk++) {
+      const ws = L.mondayOf(new Date(2026, 10, 16 + 7 * wk)), g = L.generate(S, ws, ws);
+      const sp = g.flatMap(x => x.ev.filter(e => e.kind === 'sport').map(e => [x.d, e.wi]));
+      assert.ok(sp.length === 3 && sp.every(([d, wi]) => (d === 5) === (wi === bagI)), 'the bag workout on Saturday only');
+      for (const [, wi] of sp) S.sportNext = (wi + 1) % L.SPORT.workouts.length;
+      assert.notEqual(sp[0][1], sp[1][1], 'the two weekday sessions differ');
+    }
+  }
   const legs = all.filter(e => /squat|fente|soulevé|pont|mollet/i.test(e.name)).length;
   assert.ok(legs <= 2 && legs < all.filter(e => /pompe|dips|curl|rowing|superman|y-t-w|élévations/i.test(e.name)).length / 4, 'upper body first, legs second');
   assert.ok(L.STRETCH.every(d => d.moves.length === 5) && L.STRETCH.filter(d => d.moves.some(m => /renfo/.test(m[0]))).length >= 6, 'stretching also strengthens wrists, back, knees');
@@ -196,10 +208,10 @@ console.log('focus OK');
 {
   // sport: held times in steps of 5 s; a far too easy variant is skipped
   const S = L.normalize(L.defaultState());
-  S.sportProg = { c5: { lvl: 1, target: 30, fails: 0 } };
-  assert.equal(L.sportProgress(S, 'c5', [33, 34, 36]).target % 5, 0, 'times in steps of 5');
-  S.sportProg.b1 = { lvl: 0, target: 15, fails: 0 };
-  assert.equal(L.sportProgress(S, 'b1', [40, 38, 36]).lvl, 2, 'far too easy: skip a variant');
+  S.sportProg = { a6: { lvl: 1, target: 30, fails: 0 } };
+  assert.equal(L.sportProgress(S, 'a6', [33, 34, 36]).target % 5, 0, 'times in steps of 5');
+  S.sportProg.b13 = { lvl: 0, target: 15, fails: 0 };
+  assert.equal(L.sportProgress(S, 'b13', [40, 38, 36]).lvl, 2, 'far too easy: skip a variant');
   console.log('final pass OK');
 }
 {

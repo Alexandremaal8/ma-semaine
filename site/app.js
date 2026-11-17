@@ -1703,7 +1703,7 @@ function renderSport() {
   const box = $('#sportBody'); if (!box) return;
   const nb = sportNextBlock(), light = sportLightWeek(), log = spLog();
   let h = APP !== 'main' ? linkCard() : `<button type="button" class="back" data-tab-go="today">‹ Aujourd’hui</button>`;
-  h += `<div class="sp-head"><h1>Sport</h1><p>Planche à pompes + poids du corps · 3 séances qui tournent, objectifs qui montent tout seuls.</p></div>`;
+  h += `<div class="sp-head"><h1>Sport</h1><p>Planche, poids du corps et sac · 3 séances (le samedi : dos + biceps au sac) qui tournent, objectifs qui montent tout seuls.</p></div>`;
   if (light) h += `<div class="prop"><b>Semaine légère</b><p>Une série de moins par exercice, mêmes objectifs : c’est la semaine où tes muscles récupèrent et se renforcent. Ça revient à la normale la semaine prochaine.</p></div>`;
   if (nb) {
     const w = SP.workouts[nb.e.wi != null ? nb.e.wi : (state.sportNext || 0) % SP.workouts.length];
@@ -1806,6 +1806,9 @@ const POSES = {
   raise: { props: '<rect x="50" y="55.5" width="22" height="2.5" rx="1"/>', cable: true, fr: [Object.assign({}, STAND, { e: [61, 20], w: [62, 29] }), { e: [69, 12], w: [77, 12] }] },
   superman: { fr: [{ h: [24, 51], n: [32, 54], p: [60, 55], k: [80, 55.5], f: [100, 55.5], e: [22, 55], w: [12, 55] }, { h: [24, 46], n: [32, 50], e: [21, 47], w: [11, 44], k: [80, 53], f: [99, 50] }] },
   ytw: { fr: [{ h: [24, 49], n: [32, 53], p: [60, 55], k: [80, 55.5], f: [100, 55.5], e: [22, 50], w: [12, 47] }, { e: [32, 47], w: [32, 41] }, { e: [42, 49], w: [34, 46] }] },
+  bagrow: { fr: [{ h: [82, 16], n: [76, 21], p: [56, 32], k: [62, 45], f: [60, 57], e: [76, 31], w: [76, 40] }, { e: [66, 28], w: [70, 34] }] },
+  bagcurl: { fr: [Object.assign({}, STAND, { e: [60, 20], w: [62, 31] }), { w: [68, 13] }] },
+  pullover: { fr: [{ h: [18, 52], n: [26, 55], p: [56, 56], k: [66, 42], f: [74, 56], e: [27, 46], w: [29, 37] }, { e: [18, 50], w: [9, 50] }], dur: 3 },
   // stretching + warm-up
   armcircle: { fr: [STAND, { e: [69, 11], w: [77, 11] }, { e: [61, 2], w: [62, -3] }, { e: [52, 12], w: [44, 13] }] },
   jacks: { fr: [Object.assign({}, STAND, { k2: [60, 43], f2: [60, 57] }), { k: [63, 43], f: [67, 57], k2: [57, 43], f2: [53, 57], e: [67, 5], w: [72, -2] }], dur: 1 },
@@ -1859,7 +1862,7 @@ const MOVE_POSE = [[/cercles de bras|rotations des épaules/i, 'armcircle', 'rot
   [/squats/i, 'squat', 'squat poids du corps']];
 const movePose = name => { const m = MOVE_POSE.find(x => x[0].test(name)); return m ? { pose: m[1], q: m[2] } : { pose: '', q: name }; };
 const demoUrl = e => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(e.q || e.name);
-const GEAR = { planche: 'planche', 'câbles': 'câbles', chaise: 'chaise', table: 'table', corps: 'poids du corps' };
+const GEAR = { planche: 'planche', 'câbles': 'câbles', chaise: 'chaise', sac: 'sac de linge ou sac à dos', corps: 'poids du corps' };
 // one exercise, explained: the movement, your level, all the steps up, the demo
 function exSheet(id, back) {
   const e = L.SPORT.workouts.flatMap(w => w.ex).find(x => x.id === id); if (!e) return;
