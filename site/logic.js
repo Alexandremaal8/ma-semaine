@@ -51,46 +51,46 @@ function examPass(S, examIso, date) {
 }
 /* 5 minutes every morning: 5 gentle exercises, about 1 min each. Never force, never bounce, breathe slowly. */
 const STRETCH = [
-  { name: 'Réveil du dos', moves: [
+  { name: 'Dos + poignets', moves: [
     ['Rotations des épaules', '10 grands cercles vers l’arrière, puis 10 vers l’avant, bras relâchés.', 60, false],
-    ['Étirement du cou', 'Oreille vers l’épaule sans lever l’épaule, main posée légèrement sur la tête. 30 s de chaque côté.', 60, true],
     ['Chat-vache', 'À quatre pattes : dos rond en expirant, dos creux en inspirant, lentement.', 60, false],
-    ['Posture de l’enfant', 'Fesses vers les talons, bras devant, front au sol. Respire dans le dos.', 60, false],
-    ['Flexion avant debout', 'Jambes légèrement pliées, laisse pendre le haut du corps et la tête. Remonte doucement, vertèbre par vertèbre.', 60, false]] },
-  { name: 'Hanches et jambes', moves: [
+    ['Bird dog (renfo bas du dos)', 'À quatre pattes, tends un bras et la jambe opposée, tiens 3 s, change. Dos plat comme une table, bassin immobile.', 60, false],
+    ['Poignets à quatre pattes (renfo)', 'Mains au sol doigts vers l’avant : bascule le poids vers l’avant puis l’arrière, 10 fois. Puis doigts tournés vers les genoux, 10 fois. Monte petit à petit l’appui.', 60, false],
+    ['Posture de l’enfant', 'Fesses vers les talons, bras devant, front au sol. Respire dans le dos.', 60, false]] },
+  { name: 'Genoux solides', moves: [
     ['Fente basse', 'Un genou au sol, l’autre pied devant, pousse doucement le bassin vers l’avant. 30 s par côté.', 60, true],
     ['Quadriceps debout', 'Attrape ta cheville derrière toi, genoux serrés, tiens-toi au mur. 30 s par côté.', 60, true],
-    ['Mollets au mur', 'Mains au mur, une jambe tendue derrière, talon au sol. 30 s par côté.', 60, true],
-    ['Papillon assis', 'Plantes des pieds jointes, genoux qui tombent vers l’extérieur, dos droit.', 60, false],
+    ['Chaise contre le mur (renfo genoux)', 'Dos au mur, cuisses presque parallèles au sol, genoux au-dessus des chevilles. Tiens 45 s en respirant.', 60, false],
+    ['Releveurs de pied (renfo genoux)', 'Dos au mur, talons à 30 cm du mur : lève la pointe des pieds 15 à 20 fois, lentement. Muscle l’avant de la jambe, qui tient le genou.', 60, false],
     ['Rotations de chevilles', '10 cercles par pied dans chaque sens.', 60, false]] },
-  { name: 'Spécial bureau', moves: [
+  { name: 'Bureau + poignets', moves: [
     ['Ouverture de poitrine', 'Avant-bras contre un cadre de porte, avance doucement le buste. 30 s par côté.', 60, true],
-    ['Poignets', 'Bras tendu, tire doucement les doigts vers toi, paume vers l’avant puis vers toi. 30 s par main.', 60, true],
-    ['Torsion assise', 'Assis, tourne le buste en tenant le dossier de la chaise. 30 s par côté.', 60, true],
+    ['Poignets (étirement)', 'Bras tendu, tire doucement les doigts vers toi, paume vers l’avant puis vers toi. 30 s par main.', 60, true],
+    ['Poignets forts (renfo)', 'Bras tendus devant, poings fermés : 10 flexions-extensions lentes des poignets, puis serre et ouvre les mains 20 fois, fort.', 60, false],
     ['Menton rentré', 'Rentre le menton comme pour faire un double menton, tiens 3 s, 10 fois. Parfait contre la nuque penchée sur les cours.', 60, false],
-    ['Étirement des bras au plafond', 'Doigts croisés, paumes vers le haut, grandis-toi en respirant.', 60, false]] },
-  { name: 'Colonne souple', moves: [
+    ['Superman tenu (renfo bas du dos)', 'Sur le ventre, décolle bras et jambes, tiens 3 s, repose. 8 fois, regard vers le sol.', 60, false]] },
+  { name: 'Dos solide', moves: [
     ['Chat-vache', 'À quatre pattes, alterne dos rond et dos creux au rythme de ta respiration.', 60, false],
     ['Fil de l’aiguille', 'À quatre pattes, glisse un bras sous l’autre, épaule au sol. 30 s par côté.', 60, true],
-    ['Torsion allongée', 'Sur le dos, genoux pliés qui tombent d’un côté, regard de l’autre. 30 s par côté.', 60, true],
-    ['Genoux contre la poitrine', 'Sur le dos, serre les genoux et balance doucement de gauche à droite.', 60, false],
+    ['Pont fessier tenu (renfo bas du dos)', 'Sur le dos, pieds à plat, monte le bassin et tiens 30 s fessiers serrés. Repose, recommence.', 60, false],
+    ['Bird dog (renfo bas du dos)', 'À quatre pattes, bras et jambe opposés tendus, 3 s, change. Rien ne bouge au niveau du bassin.', 60, false],
     ['Cobra doux', 'Sur le ventre, mains sous les épaules, soulève juste un peu la poitrine, coudes pliés.', 60, false]] },
-  { name: 'Arrière des jambes', moves: [
+  { name: 'Jambes + genoux', moves: [
     ['Ischios assis', 'Une jambe tendue, l’autre pliée, penche-toi dos droit vers le pied tendu. 30 s par côté.', 60, true],
     ['Pigeon allongé', 'Sur le dos, cheville sur le genou opposé, tire la jambe du dessous vers toi. 30 s par côté.', 60, true],
-    ['Fente basse', 'Un genou au sol, bassin vers l’avant. 30 s par côté.', 60, true],
-    ['Flexion avant debout', 'Genoux souples, laisse pendre, remonte lentement.', 60, false],
+    ['Descente lente sur une marche (renfo genoux)', 'Debout sur une marche sur une jambe, descends l’autre talon vers le sol en 3 s en pliant le genou (dans l’axe du pied), remonte. 6 à 8 par jambe.', 60, true],
+    ['Chaise contre le mur (renfo genoux)', 'Dos au mur, cuisses presque parallèles au sol. Tiens 45 s.', 60, false],
     ['Respiration profonde', 'Debout, inspire 4 s en levant les bras, expire 6 s en les descendant.', 60, false]] },
   { name: 'Tout le corps', moves: [
     ['Rotations des épaules', '10 cercles vers l’arrière, 10 vers l’avant.', 60, false],
-    ['Inclinaison latérale', 'Un bras au-dessus de la tête, penche-toi sur le côté. 30 s par côté.', 60, true],
+    ['Poignets à quatre pattes (renfo)', 'Bascule le poids sur les mains doigts vers l’avant, puis doigts vers les genoux. 10 fois chacun.', 60, false],
     ['Fente basse', 'Un genou au sol, bassin vers l’avant. 30 s par côté.', 60, true],
-    ['Chat-vache', 'Dos rond, dos creux, lentement.', 60, false],
+    ['Bird dog (renfo bas du dos)', 'Bras et jambe opposés tendus, 3 s, change.', 60, false],
     ['Posture de l’enfant', 'Fesses aux talons, bras devant, respire.', 60, false]] },
   { name: 'Dimanche tranquille', moves: [
     ['Respiration profonde', 'Inspire 4 s, expire 6 s, épaules relâchées.', 60, false],
     ['Étirement du cou', 'Oreille vers l’épaule, 30 s par côté.', 60, true],
-    ['Papillon assis', 'Plantes des pieds jointes, dos droit.', 60, false],
+    ['Équilibre sur une jambe (renfo genoux)', 'Debout sur une jambe, genou un tout petit peu fléchi, 30 s par côté. Trop facile : yeux fermés.', 60, true],
     ['Torsion allongée', 'Sur le dos, genoux d’un côté. 30 s par côté.', 60, true],
     ['Posture de l’enfant', 'Fesses aux talons, front au sol.', 60, false]] }
 ];
@@ -1334,33 +1334,34 @@ const PUSHUP_LV = zone => [
   ['Pieds surélevés', 'Pieds sur une chaise ou le lit : plus de poids sur les bras.'],
   ['Pieds surélevés + descente en 3 s', 'Pieds sur la chaise et 3 secondes pour descendre.'],
   ['Archer (par côté)', 'Mains très écartées : descends vers une main, l’autre bras reste presque tendu. Reps par côté.']];
-// board + body weight first; the cables are easy for you, so one cable exercise only, at its hardest settings
-const INV_ROW = X('b8', 'Rowing inversé sous la table', 4, 6, 12, 90, [['Genoux pliés', 'Allongé sous une table SOLIDE, mains au bord, pieds au sol genoux pliés. Tire la poitrine vers le bord, corps gainé, puis redescends bras tendus.'], ['Jambes tendues', 'Pareil, jambes tendues : corps droit des talons à la tête.'], ['Tenir 2 s en haut', 'Poitrine contre le bord, serre les omoplates 2 s (c’est pendant la répétition : le repos entre les séries ne change pas).'], ['Pieds sur une chaise', 'Pieds surélevés : corps horizontal, beaucoup plus dur.']], { pose: 'invrow', q: 'rowing inversé sous une table inverted row', cue: 'Vérifie que la table ne bascule pas. Coudes près du corps, pas de hanches qui tombent.', gear: 'table' });
+// body weight + board, and the cables where they are really good: back, biceps, shoulders. No table rows.
+const SUPERMAN = X('b11', 'Superman · dos', 3, 8, 15, 60, [['Bras le long du corps', 'Sur le ventre, décolle poitrine et jambes, serre les omoplates, tiens 2 s, repose.'], ['Bras devant (Superman)', 'Bras tendus devant : décolle bras, poitrine et jambes, tiens 2 s.'], ['Nageur', 'Position Superman tenue, bras et jambes qui battent en croisé : 1 aller-retour = 1 rep.'], ['Superman + tirage', 'Bras devant, puis ramène les coudes vers les côtes comme une traction, tends, repose.']], { pose: 'superman', q: 'superman exercice dos au sol', cue: 'Regard vers le sol, nuque longue. Ce sont les fessiers et le dos qui montent, pas la tête.' });
 const SPORT = {
-  warm: [['Cercles de bras', '10 en avant, 10 en arrière, bras tendus', 45], ['Jumping jacks', 'Rythme tranquille, pour monter le cœur', 45], ['Squats sans charge', 'Lents, talons au sol, poitrine haute', 45], ['Chat-vache', 'À quatre pattes : arrondis puis creuse le dos, lentement', 45], ['Pompes faciles', 'Mains sur la table ou le lit, 10 reps sans forcer', 45]],
+  warm: [['Cercles de bras', '10 en avant, 10 en arrière, bras tendus', 45], ['Jumping jacks', 'Rythme tranquille, pour monter le cœur', 45], ['Cercles de poignets', '10 cercles dans chaque sens, mains jointes', 45], ['Chat-vache', 'À quatre pattes : arrondis puis creuse le dos, lentement', 45], ['Pompes faciles', 'Mains sur la table ou le lit, 10 reps sans forcer', 45]],
   workouts: [
     { id: 'A', name: 'Poussée + gainage', focus: 'Pecs, épaules, triceps, abdos', ex: [
       X('a1', 'Pompes · zone poitrine', 4, 8, 15, 90, PUSHUP_LV('de la zone poitrine (Chest)'), { start: 1, pose: 'pushup', q: 'pompes technique push up board', cue: 'Le corps reste droit comme une planche : ni fesses en l’air, ni ventre qui tombe.', gear: 'planche' }),
       X('a2', 'Pompes piquées · zone épaules', 3, 6, 12, 90, [['Piquées', 'Poignées de la zone épaules (Shoulder). Fesses en l’air en V inversé, descends la tête entre les mains.'], ['Pieds sur une chaise', 'Plus vertical : plus de poids sur les épaules.'], ['Pieds sur la chaise, descente en 3 s', '3 secondes pour descendre la tête vers la planche, puis pousse.'], ['Pieds au mur (presque à l’équilibre)', 'Mains près du mur, pieds qui montent le mur : le top avant les pompes en équilibre.']], { pose: 'pike', q: 'pike push up tutoriel', cue: 'La tête descend vers la planche, un peu devant les mains : tête et mains forment un triangle.', gear: 'planche' }),
+      X('a5', 'Élévations latérales · câbles', 3, 12, 20, 60, [['Deux bras', 'Debout sur la planche (câbles accrochés dessous), bras presque tendus, monte les poignées sur les côtés jusqu’à hauteur d’épaule.'], ['Descente en 3 s', 'Monte normalement, 3 secondes pour redescendre.'], ['Câbles raccourcis', 'Enroule une fois le câble autour de la main : bien plus de tension.'], ['Un bras, les deux câbles', 'Les deux câbles dans la même main, un bras à la fois. Reps par bras.']], { pose: 'raise', q: 'élévations latérales élastique lateral raise band', cue: 'Monte les coudes, pas les épaules vers les oreilles. Pas d’élan.', gear: 'câbles' }),
       X('c4', 'Dips sur chaise', 3, 8, 15, 75, [['Jambes pliées', 'Mains sur le bord d’une chaise stable (contre un mur), descends en pliant les coudes vers l’arrière.'], ['Jambes tendues', 'Talons au sol, jambes tendues.'], ['Pieds surélevés', 'Pieds sur une autre chaise ou le lit.'], ['Pieds surélevés, descente en 3 s', 'Contrôle 3 secondes la descente.']], { pose: 'dips', q: 'dips sur chaise triceps bench dips', cue: 'Épaules basses, loin des oreilles. Descends jusqu’à coudes à 90°, pas plus.', gear: 'chaise' }),
       X('a4', 'Pompes serrées · zone triceps', 3, 8, 15, 75, PUSHUP_LV('de la zone triceps (prise serrée)'), { pose: 'pushup', q: 'pompes serrées diamond push up', cue: 'Coudes qui frôlent les côtes en descendant.', gear: 'planche' }),
       X('a6', 'Gainage (planche)', 3, 30, 60, 45, [['Sur les avant-bras', 'Corps droit des talons à la tête, fesses serrées, respire.'], ['Bras tendus sur les poignées', 'Mains sur les poignées, épaules au-dessus des mains.'], ['Une jambe levée', 'Alterne la jambe toutes les 10 secondes.'], ['Toucher d’épaule', 'Bras tendus, touche l’épaule opposée en alternant, sans bouger les hanches.']], { time: true, pose: 'plank', q: 'gainage planche technique', cue: 'Serre les fesses et rentre le ventre : le bas du dos ne doit pas se creuser.' }),
       X('a7', 'Creux (hollow hold)', 3, 20, 45, 45, [['Genoux pliés', 'Sur le dos, bas du dos COLLÉ au sol, épaules et pieds décollés, genoux pliés.'], ['Jambes tendues', 'Jambes tendues et basses, bras le long du corps.'], ['Bras au-dessus de la tête', 'Bras tendus derrière la tête : la position banane complète.']], { time: true, pose: 'hollow', q: 'hollow body hold tutoriel', cue: 'Si le bas du dos décolle, plie les genoux ou remonte les jambes.' })] },
-    { id: 'B', name: 'Tirage + jambes', focus: 'Dos, biceps, cuisses, fessiers', ex: [
-      INV_ROW,
+    { id: 'B', name: 'Dos + biceps', focus: 'Dos, biceps, arrière d’épaules, abdos, un peu de jambes', ex: [
+      SUPERMAN,
+      X('b1', 'Rowing · câbles', 3, 12, 20, 60, [['Un bras, les deux câbles', 'Pied sur la planche, buste penché, les deux câbles dans la même main : tire vers la hanche. Reps par bras.'], ['Un bras + tenir 2 s', 'Serre l’omoplate 2 secondes en haut de chaque rep.'], ['Câbles raccourcis', 'Enroule une fois le câble autour de la main : bien plus de tension.'], ['Raccourcis + descente en 3 s', 'Le plus dur : câble enroulé, 3 s pour rendre.']], { side: true, pose: 'cablerow', q: 'rowing un bras élastique', cue: 'Dos plat, tire le coude vers la hanche, pas l’épaule vers l’oreille.', gear: 'câbles' }),
+      X('b5', 'Curl biceps · câbles', 4, 10, 20, 60, [['Deux bras', 'Debout sur la planche (câbles dessous), coudes collés au corps, monte les poignées vers les épaules.'], ['Descente en 3 s', 'Monte normalement, 3 secondes pour redescendre.'], ['Câbles raccourcis', 'Enroule une fois le câble autour de la main : bien plus de tension.'], ['Raccourcis + descente en 3 s', 'Câble enroulé et 3 secondes pour redescendre.'], ['Un bras, les deux câbles', 'Les deux câbles dans la même main. Reps par bras.']], { pose: 'curl', q: 'curl biceps élastique band curl', cue: 'Les coudes ne bougent pas, pas d’élan avec le dos.', gear: 'câbles' }),
+      X('b12', 'Y-T-W au sol · haut du dos', 3, 6, 12, 60, [['Pouces vers le haut', 'Sur le ventre, front sur une serviette. Bras en Y, décolle 2 s ; bras en T, 2 s ; coudes pliés en W, 2 s. Y+T+W = 1 rep.'], ['Tenir 3 s', 'Chaque lettre tenue 3 secondes.'], ['Poitrine décollée', 'Garde la poitrine un peu décollée pendant toute la série.']], { pose: 'ytw', q: 'YTW exercice au sol dos', cue: 'Serre les omoplates vers le bas et l’arrière, pas vers les oreilles.' }),
       X('b2', 'Squat', 4, 12, 20, 75, [['Squat', 'Pieds largeur d’épaules, descends comme pour t’asseoir, genoux dans l’axe des pieds.'], ['Descente en 3 s', '3 secondes pour descendre, remontée dynamique.'], ['Tenir 2 s en bas', 'Arrête-toi 2 s tout en bas de chaque répétition.'], ['Squat bulgare (par jambe)', 'Pied arrière sur une chaise, descends sur la jambe avant. Les reps sont par jambe.'], ['Bulgare, descente en 3 s', 'Le même, 3 secondes pour descendre.']], { pose: 'squat', q: 'squat poids du corps technique', cue: 'Talons au sol, poitrine haute, genoux qui suivent les orteils.' }),
-      X('b1', 'Rowing · câbles (le seul aux câbles)', 3, 12, 20, 60, [['Un bras, les deux câbles', 'Pied sur la planche, buste penché, les deux câbles dans la même main : tire vers la hanche. Reps par bras.'], ['Un bras + tenir 2 s', 'Serre l’omoplate 2 secondes en haut de chaque rep.'], ['Câbles raccourcis', 'Enroule une fois le câble autour de la main : bien plus de tension.'], ['Raccourcis + descente en 3 s', 'Le plus dur : câble enroulé, 3 s pour rendre.']], { side: true, pose: 'cablerow', q: 'rowing un bras élastique', cue: 'Dos plat, tire le coude vers la hanche, pas l’épaule vers l’oreille.', gear: 'câbles' }),
-      X('b10', 'Soulevé de terre une jambe', 3, 8, 12, 60, [['Main sur un mur', 'Debout sur une jambe, l’autre part en arrière pendant que le buste se penche, dos plat. Reps par jambe.'], ['Sans appui', 'Même chose sans te tenir.'], ['Descente en 3 s', '3 secondes pour descendre, sens l’étirement derrière la cuisse.']], { side: true, pose: 'sldl', q: 'single leg deadlift poids du corps', cue: 'Les hanches restent de face, la jambe arrière dans l’alignement du dos.' }),
-      X('b6', 'Pont fessier', 3, 12, 20, 45, [['Deux jambes', 'Sur le dos, pieds à plat, monte le bassin en serrant les fessiers.'], ['Tenir 2 s en haut', 'Bassin en haut, fessiers serrés 2 secondes à chaque rep.'], ['Une jambe (par jambe)', 'Une jambe tendue en l’air.'], ['Une jambe, pied sur le lit', 'Épaules au sol, pied sur le bord du lit : plus d’amplitude.']], { pose: 'bridge', q: 'pont fessier glute bridge', cue: 'Pousse dans les talons, pas de creux dans le bas du dos en haut.' }),
       X('b7', 'Dead bug', 3, 8, 12, 45, [['Lent', 'Sur le dos, bras vers le plafond, genoux à 90°. Descends bras et jambe opposés sans décoller le bas du dos. Reps par côté.'], ['Très lent (3 s)', '3 secondes pour descendre.']], { pose: 'deadbug', q: 'dead bug exercice', cue: 'Expire en allongeant : le bas du dos reste plaqué au sol.' })] },
-    { id: 'C', name: 'Corps complet', focus: 'Tout le corps, plus cardio', ex: [
+    { id: 'C', name: 'Corps complet', focus: 'Pecs, biceps, dos, jambes, abdos, cardio', ex: [
       X('c1', 'Pompes larges · zone dos', 3, 8, 15, 75, PUSHUP_LV('de la zone large (Back)'), { start: 1, pose: 'pushup', q: 'pompes larges wide push up', cue: 'Coudes ouverts mais pas à 90° : garde-les vers 60°.', gear: 'planche' }),
+      X('c10', 'Curl marteau · câbles', 3, 10, 20, 60, [['Deux bras', 'Debout sur la planche, pouces vers le haut (prise marteau), coudes collés, monte vers les épaules.'], ['Descente en 3 s', '3 secondes pour redescendre.'], ['Câbles raccourcis', 'Câble enroulé une fois autour de la main.'], ['Un bras, les deux câbles', 'Les deux câbles dans la même main. Reps par bras.']], { pose: 'curl', q: 'curl marteau élastique hammer curl band', cue: 'Poignet droit, coude collé au corps.', gear: 'câbles' }),
+      SUPERMAN,
       X('c2', 'Fentes arrière', 3, 8, 15, 75, [['Sans charge', 'Recule une jambe, descends le genou arrière près du sol, buste droit. Reps par jambe.'], ['Descente en 3 s', '3 secondes pour descendre.'], ['Tenir 2 s en bas', 'Genou arrière juste au-dessus du sol, 2 secondes.'], ['Fentes sautées', 'Change de jambe en sautant, en douceur.']], { side: true, pose: 'lunge', q: 'fentes arrière reverse lunge', cue: 'Le genou avant reste au-dessus de la cheville.' }),
-      INV_ROW,
       X('c9', 'Burpees', 3, 6, 12, 75, [['Pas à pas', 'Mains au sol, recule les pieds un par un, reviens, relève-toi. Sans saut.'], ['Classiques', 'Saute les pieds en arrière, reviens, saute en l’air.'], ['Avec une pompe', 'Une pompe en bas à chaque rep.']], { pose: 'burpee', q: 'burpee technique débutant', cue: 'Dos gainé quand tu es en planche, atterris en douceur.' }),
       X('c5', 'Mountain climbers · poignées', 3, 30, 45, 45, [['Rythme tranquille', 'Mains sur les poignées, ramène les genoux vers la poitrine en alternant.'], ['Rapide', 'Le plus vite possible en gardant le dos plat.']], { time: true, pose: 'climber', q: 'mountain climbers technique', cue: 'Épaules au-dessus des mains, les hanches ne montent pas.', gear: 'planche' }),
-      X('c6', 'Planche latérale', 2, 20, 45, 30, [['Sur les genoux', 'Sur l’avant-bras, genoux au sol, corps droit. Temps par côté.'], ['Jambes tendues', 'Sur l’avant-bras et le côté du pied.'], ['Jambe du dessus levée', 'Plus dur pour les obliques.']], { time: true, side: true, pose: 'sideplank', q: 'planche latérale side plank', cue: 'Le coude sous l’épaule, les hanches hautes.' }),
-      X('c7', 'Mollets', 2, 15, 25, 30, [['Deux pieds', 'Avant des pieds sur une marche ou la planche, monte sur la pointe, descends lentement.'], ['Un pied', 'Un pied à la fois.']], { pose: 'calf', q: 'mollets sur une marche calf raise', cue: 'Descends le talon bien bas avant de remonter.' })] }
+      X('c6', 'Planche latérale', 2, 20, 45, 30, [['Sur les genoux', 'Sur l’avant-bras, genoux au sol, corps droit. Temps par côté.'], ['Jambes tendues', 'Sur l’avant-bras et le côté du pied.'], ['Jambe du dessus levée', 'Plus dur pour les obliques.']], { time: true, side: true, pose: 'sideplank', q: 'planche latérale side plank', cue: 'Le coude sous l’épaule, les hanches hautes.' })] }
   ]
 };
 const mockPrepBudget = su => ({ 3: 210, 2: 150, 1: 100 })[su && su.prio] || 150;

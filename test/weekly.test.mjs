@@ -146,7 +146,12 @@ console.log('focus OK');
 {
   // the sport program: board + body weight, one cable exercise at most, every move illustrated, real rests
   const all = L.SPORT.workouts.flatMap(w => w.ex);
-  assert.ok(all.filter(e => e.gear === 'câbles').length <= 1, 'cables minimized');
+  assert.ok(all.filter(e => e.gear === 'câbles').every(e => /rowing|curl|élévations/i.test(e.name)), 'cables only for back, biceps, shoulders');
+  assert.ok(!all.some(e => e.gear === 'table' || /table/i.test(e.name)), 'no table rows');
+  assert.ok(all.filter(e => /curl/i.test(e.name)).length >= 2, 'biceps twice a rotation');
+  const legs = all.filter(e => /squat|fente|soulevé|pont|mollet/i.test(e.name)).length;
+  assert.ok(legs <= 2 && legs < all.filter(e => /pompe|dips|curl|rowing|superman|y-t-w|élévations/i.test(e.name)).length / 4, 'upper body first, legs second');
+  assert.ok(L.STRETCH.every(d => d.moves.length === 5) && L.STRETCH.filter(d => d.moves.some(m => /renfo/.test(m[0]))).length >= 6, 'stretching also strengthens wrists, back, knees');
   assert.ok(all.every(e => e.pose && e.q && e.rest >= 30), 'every exercise has a figure, a demo search and a real rest');
   assert.ok(!all.some(e => e.levels.some(l => /pause/i.test(l[0]))), 'no "pause" variant that reads like a rest');
   console.log('sport v2 OK');
