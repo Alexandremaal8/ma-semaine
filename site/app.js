@@ -1130,7 +1130,7 @@ let stretchTimer = null;
 function stretchSheet(d, wk, id) {
   const r = L.STRETCH[d];
   openSheet('Stretching · ' + r.name, `<p class="hint" style="margin:-4px 0 12px;padding:0">5 exercices, 1 min chacun. Doucement, sans forcer ni faire de à-coups : tu dois sentir un étirement, jamais une douleur. Respire lentement.</p>
-    <div class="group" id="stList">${r.moves.map((mv, i) => `<div class="st-row" data-i="${i}"><span class="st-n">${i + 1}</span><span class="bd"><span class="ti">${esc(mv[0])}${mv[3] ? ' <em class="tag cu">2 côtés</em>' : ''}</span><span class="su">${esc(mv[1])}</span></span><span class="st-t num" id="stT${i}">1:00</span></div>`).join('')}</div>
+    <div class="group" id="stList">${r.moves.map((mv, i) => `<div class="st-row" data-i="${i}"><span class="st-n">${i + 1}</span><span class="st-fig">${poseSvg(movePose(mv[0]).pose)}</span><span class="bd"><span class="ti">${esc(mv[0])}${mv[3] ? ' <em class="tag cu">2 côtés</em>' : ''}</span><span class="su">${esc(mv[1])}</span><a class="st-demo" href="${demoUrl(movePose(mv[0]))}" target="_blank" rel="noopener">▶ vidéo</a></span><span class="st-t num" id="stT${i}">1:00</span></div>`).join('')}</div>
     <div class="st-now" id="stNow" hidden></div>
     <div class="sh-actions"><button type="button" class="btn pri" data-act="stretchGo" data-v="${d}" data-w="${wk}" data-id="${id}" id="stGo">Démarrer le minuteur</button></div>`);
 }
@@ -1143,7 +1143,9 @@ function stretchRun(d, wk, id) {
     document.querySelectorAll('.st-row').forEach((el, k) => { el.classList.toggle('on', k === i); el.classList.toggle('ok', k < i); });
     const mv = r.moves[i], el = $('#stT' + i); if (el) el.textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
     now.hidden = false;
-    now.innerHTML = `<b>${esc(mv[0])}</b><span>${mv[3] && t <= mv[2] / 2 ? 'Change de côté' : mv[3] ? 'Premier côté' : 'Tiens la position, respire'}</span>`;
+    const mp = movePose(mv[0]);
+    if (now.dataset.i !== String(i)) { now.dataset.i = i; now.innerHTML = `<div class="st-big">${poseSvg(mp.pose, 'big')}</div><b>${esc(mv[0])}</b><span id="stSay"></span><a class="st-demo" href="${demoUrl(mp)}" target="_blank" rel="noopener">▶ Voir une vidéo</a>`; }
+    $('#stSay').textContent = `${mv[3] && t <= mv[2] / 2 ? 'Change de côté' : mv[3] ? 'Premier côté' : 'Tiens la position, respire'}`;
   };
   paint();
   stretchTimer = setInterval(() => {
@@ -1804,6 +1806,33 @@ const POSES = {
   raise: { props: '<rect x="50" y="55.5" width="22" height="2.5" rx="1"/>', cable: true, fr: [Object.assign({}, STAND, { e: [61, 20], w: [62, 29] }), { e: [69, 12], w: [77, 12] }] },
   superman: { fr: [{ h: [24, 51], n: [32, 54], p: [60, 55], k: [80, 55.5], f: [100, 55.5], e: [22, 55], w: [12, 55] }, { h: [24, 46], n: [32, 50], e: [21, 47], w: [11, 44], k: [80, 53], f: [99, 50] }] },
   ytw: { fr: [{ h: [24, 49], n: [32, 53], p: [60, 55], k: [80, 55.5], f: [100, 55.5], e: [22, 50], w: [12, 47] }, { e: [32, 47], w: [32, 41] }, { e: [42, 49], w: [34, 46] }] },
+  // stretching + warm-up
+  armcircle: { fr: [STAND, { e: [69, 11], w: [77, 11] }, { e: [61, 2], w: [62, -3] }, { e: [52, 12], w: [44, 13] }] },
+  jacks: { fr: [Object.assign({}, STAND, { k2: [60, 43], f2: [60, 57] }), { k: [63, 43], f: [67, 57], k2: [57, 43], f2: [53, 57], e: [67, 5], w: [72, -2] }], dur: 1 },
+  wristcircle: { fr: [Object.assign({}, STAND, { e: [66, 17], w: [74, 16] }), { w: [74, 12] }, { w: [75, 19] }], dur: 1.6 },
+  wriststretch: { fr: [Object.assign({}, STAND, { e: [69, 11], w: [77, 11] }), { w: [77, 7] }], dur: 4 },
+  wristflex: { fr: [Object.assign({}, STAND, { e: [69, 11], w: [77, 7] }), { w: [77, 15] }], dur: 1.6 },
+  catcow: { fr: [{ h: [89, 36], n: [82, 38], p: [52, 38], k: [52, 56], f: [34, 56], e: [82, 47], w: [82, 56] }, { h: [86, 45], n: [80, 35], p: [52, 35] }], dur: 4 },
+  birddog: { fr: [Object.assign({}, { h: [89, 36], n: [82, 38], p: [52, 38], k: [52, 56], f: [34, 56], e: [82, 47], w: [82, 56] }, { k2: [52, 56], f2: [34, 56] }), { e: [91, 37], w: [100, 36], k: [37, 38], f: [21, 39] }], dur: 4 },
+  wristquad: { fr: [{ h: [89, 36], n: [82, 38], p: [52, 38], k: [52, 56], f: [34, 56], e: [82, 47], w: [82, 56] }, { h: [95, 36], n: [88, 38], p: [58, 40], e: [85, 47] }], dur: 3 },
+  child: { fr: [{ h: [68, 52], n: [60, 51], p: [36, 49], k: [52, 57], f: [32, 57], e: [76, 55], w: [88, 56] }, { p: [36, 46], n: [60, 49], h: [68, 50] }], dur: 5 },
+  lungestretch: { fr: [{ h: [57, 12], n: [56, 19], p: [55, 38], k: [72, 41], f: [74, 57], k2: [42, 56], f2: [25, 57], e: [60, 29], w: [67, 38] }, { p: [60, 41], n: [60, 22], h: [61, 15], e: [64, 32], w: [70, 39], k2: [44, 56] }], dur: 5 },
+  quad: { fr: [Object.assign({}, STAND, { k2: [60, 43], f2: [52, 31], e: [55, 20], w: [52, 30] }), { f2: [51, 30] }], dur: 4 },
+  wallsit: { props: '<path d="M40 -2v60"/>', fr: [{ h: [46, 14], n: [45, 21], p: [45, 38], k: [61, 38], f: [61, 57], e: [47, 30], w: [53, 36] }, { h: [46, 13.5] }], dur: 4 },
+  tibialis: { props: '<path d="M50 -2v60"/>', fr: [{ h: [55, 5], n: [55, 11], p: [57, 29], k: [62, 43], f: [66, 57], e: [56, 20], w: [57, 28] }, { f: [68, 53] }], dur: 1.6 },
+  ankle: { fr: [Object.assign({}, STAND, { k2: [65, 42], f2: [70, 52] }), { f2: [74, 50] }, { f2: [70, 48] }, { f2: [66, 50] }], dur: 2 },
+  chestopen: { props: '<path d="M74 -2v60"/>', fr: [Object.assign({}, STAND, { e: [70, 11], w: [72, 2] }), { h: [64, 5], n: [63, 11], p: [61, 29], e: [70, 12], w: [72, 3] }], dur: 5 },
+  chintuck: { fr: [STAND, { h: [58, 5] }], dur: 3 },
+  neck: { fr: [Object.assign({}, STAND, { e: [67, 6], w: [63, 0] }), { h: [64, 7], w: [66, 2] }], dur: 5 },
+  threadneedle: { fr: [{ h: [89, 36], n: [82, 38], p: [52, 38], k: [52, 56], f: [34, 56], e: [82, 47], w: [82, 56] }, { h: [80, 51], n: [76, 46], e: [68, 53], w: [58, 56] }], dur: 5 },
+  cobra: { fr: [{ h: [26, 50], n: [34, 54], p: [62, 55.5], k: [82, 55.5], f: [102, 55.5], e: [34, 50], w: [40, 56] }, { h: [27, 42], n: [34, 46], e: [37, 51] }], dur: 4 },
+  hamstring: { fr: [{ h: [44, 31], n: [42, 38], p: [40, 56], k: [60, 56], f: [80, 56], e: [50, 44], w: [58, 50] }, { h: [61, 41], n: [54, 43], e: [63, 49], w: [72, 54] }], dur: 5 },
+  figure4: { fr: [{ h: [18, 52], n: [26, 55], p: [56, 56], k: [62, 40], f: [56, 26], k2: [74, 46], f2: [66, 40], e: [42, 46], w: [58, 42] }, { k: [58, 38], f: [52, 24], k2: [70, 44], f2: [62, 38], w: [55, 40] }], dur: 5 },
+  stepdown: { props: '<rect x="50" y="50" width="22" height="8" rx="1"/>', fr: [{ h: [61, 0], n: [60, 6], p: [60, 23], k: [60, 36], f: [60, 49], k2: [62, 36], f2: [67, 48], e: [66, 12], w: [73, 12] }, { h: [58, 5], n: [58, 11], p: [56, 28], k: [64, 39], k2: [67, 42], f2: [72, 57], e: [65, 16], w: [72, 16] }], dur: 3.5 },
+  breathe: { fr: [STAND, { e: [67, 4], w: [71, -3] }], dur: 5 },
+  balance: { fr: [Object.assign({}, STAND, { k2: [67, 36], f2: [64, 49], e: [67, 17], w: [74, 20] }), { h: [62, 5], e: [68, 16] }], dur: 3 },
+  twistsupine: { fr: [Object.assign({}, { h: [18, 52], n: [26, 55], p: [56, 56], k: [66, 42], f: [74, 56], e: [36, 56], w: [46, 56] }, { e: [24, 47], w: [20, 40] }), { k: [72, 52], f: [80, 56] }], dur: 5 },
+  inclinepush: { props: '<path d="M84 32h26M88 32v26M106 32v26"/>', fr: [{ h: [91, 22], n: [84, 27], p: [56, 43], k: [42, 50], f: [28, 57], e: [86, 37], w: [88, 32] }, { h: [87, 28], n: [80, 33], p: [54, 46], e: [72, 33] }], dur: 2 },
   calf: { props: '<rect x="54" y="55" width="16" height="3" rx="1"/>', fr: [Object.assign({}, STAND, { f: [61, 55] }), { h: [61, 1], n: [60, 7], p: [60, 25], k: [60, 39], e: [60, 16], w: [60, 24], f: [62, 52] }] }
 };
 function poseSvg(name, cls = '') {
@@ -1817,7 +1846,18 @@ function poseSvg(name, cls = '') {
   return `<svg class="pose ${cls}" viewBox="0 -4 120 66" aria-hidden="true"><line class="gnd" x1="2" y1="58.5" x2="118" y2="58.5"/><g class="prop">${P.props || ''}</g>${cable}${legs2}${line('n', 'p')}${line('p', 'k')}${line('k', 'f')}${line('n', 'e')}${line('e', 'w')}<circle r="4.6" cx="${fr[0].h[0]}" cy="${fr[0].h[1]}">${an('cx', loop.map(f => f.h[0]))}${an('cy', loop.map(f => f.h[1]))}</circle></svg>`;
 }
 self.__sp = { poseSvg: (...a) => poseSvg(...a), POSES };
-self.__app = { get state() { return state; }, save: () => save(), syncAll: () => syncAll(), pull: f => pull(f), foStop: f => foStop(f) };
+self.__app = { get state() { return state; }, stretch: (d) => { stretchSheet(d, iso(mondayOf(new Date())), "t"); },  save: () => save(), syncAll: () => syncAll(), pull: f => pull(f), foStop: f => foStop(f) };
+const MOVE_POSE = [[/cercles de bras|rotations des épaules/i, 'armcircle', 'rotation épaules échauffement'], [/jumping/i, 'jacks', 'jumping jacks'], [/cercles de poignets/i, 'wristcircle', 'échauffement poignets'],
+  [/chat-vache/i, 'catcow', 'chat vache étirement cat cow'], [/bird dog/i, 'birddog', 'bird dog exercice'], [/poignets à quatre/i, 'wristquad', 'renforcement poignets à quatre pattes wrist prep'],
+  [/poignets forts/i, 'wristflex', 'renforcement poignets sans matériel'], [/poignets/i, 'wriststretch', 'étirement poignets avant-bras'], [/enfant/i, 'child', 'posture de l’enfant yoga'],
+  [/fente basse/i, 'lungestretch', 'fente basse étirement psoas'], [/quadriceps/i, 'quad', 'étirement quadriceps debout'], [/chaise contre/i, 'wallsit', 'chaise contre le mur wall sit'],
+  [/releveurs/i, 'tibialis', 'tibialis raise contre le mur'], [/chevilles/i, 'ankle', 'rotations chevilles'], [/poitrine/i, 'chestopen', 'étirement pectoraux cadre de porte'],
+  [/menton/i, 'chintuck', 'chin tuck menton rentré'], [/superman/i, 'superman', 'superman exercice dos'], [/aiguille/i, 'threadneedle', 'fil de l’aiguille thread the needle'],
+  [/pont fessier/i, 'bridge', 'pont fessier tenu'], [/cobra/i, 'cobra', 'cobra doux étirement'], [/ischios/i, 'hamstring', 'étirement ischios assis'],
+  [/pigeon/i, 'figure4', 'pigeon allongé figure 4 stretch'], [/marche/i, 'stepdown', 'step down genou excentrique'], [/respiration/i, 'breathe', 'respiration profonde debout'],
+  [/cou/i, 'neck', 'étirement du cou'], [/équilibre/i, 'balance', 'équilibre sur une jambe'], [/torsion/i, 'twistsupine', 'torsion allongée étirement'], [/pompes faciles/i, 'inclinepush', 'pompes inclinées débutant'],
+  [/squats/i, 'squat', 'squat poids du corps']];
+const movePose = name => { const m = MOVE_POSE.find(x => x[0].test(name)); return m ? { pose: m[1], q: m[2] } : { pose: '', q: name }; };
 const demoUrl = e => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(e.q || e.name);
 const GEAR = { planche: 'planche', 'câbles': 'câbles', chaise: 'chaise', table: 'table', corps: 'poids du corps' };
 // one exercise, explained: the movement, your level, all the steps up, the demo
@@ -1878,7 +1918,7 @@ function sportPaint() {
   const prog = `<div class="sp-prog">${w.ex.map((x, i) => `<i class="${i < r.ex ? 'ok' : i === r.ex && r.step !== 'warm' ? 'on' : ''}"></i>`).join('')}</div>`;
   if (r.step === 'warm') {
     const m = SP.warm[r.wIdx];
-    box.innerHTML = `${prog}<div class="sp-k">Échauffement · ${r.wIdx + 1}/${SP.warm.length}</div><div class="sp-n">${esc(m[0])}</div><div class="sp-h">${esc(m[1])}</div><div class="sp-big num">${mmss(r.t)}</div>`;
+    box.innerHTML = `${prog}<div class="sp-k">Échauffement · ${r.wIdx + 1}/${SP.warm.length}</div><div class="sp-n">${esc(m[0])}</div>${poseSvg(movePose(m[0]).pose, 'run')}<div class="sp-h">${esc(m[1])}</div><a class="btn ex-demo" href="${demoUrl(movePose(m[0]))}" target="_blank" rel="noopener">▶ Vidéo</a><div class="sp-big num">${mmss(r.t)}</div>`;
     act.innerHTML = `<button type="button" class="btn" data-act="spSkip">Passer l’échauffement</button>`;
     return;
   }
