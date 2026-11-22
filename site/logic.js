@@ -868,7 +868,11 @@ function generate(S0, weekStart, now) {
   for (const mk of S.mocks || []) if (mk.date && (mk.ready || mk.date <= todayIsoNow) && subjOf(S, mk.subj)) { const md = fromIso(mk.date); overRev.add(mk.subj + '|Révision pour l’examen blanc (' + DAYS[dow(md)].toLowerCase() + ' ' + md.getDate() + ')'); }
   const examOver = su => su.exam && (su.exam <= todayIsoNow || su.examReady === su.exam);
   // a revision block whose mock/exam is behind you: not shown, not counted late, never back
-  const dropped = b => b && b.subj && b.title && (overRev.has(b.subj + '|' + b.title) || (/^Examen du /.test(b.title) && examOver(subjOf(S, b.subj) || {})));
+  // a past block whose work is already done (the correction checked, the série finished) never comes back as "pas fait"
+  const isCorr = b => b.corr || /avec la correction|corrigé/i.test(b.title || '');
+  const taskDone = b => isCorr(b) ? (corr[b.subj] || 0) > 0 && corrLeft[b.subj] === 0
+    : b.serie && !b.bl && !b.fixed && !/retard|finir/i.test(b.title) && !!((S.serieDone || {})[key] || {})[b.subj];
+  const dropped = b => b && b.subj && b.title && (overRev.has(b.subj + '|' + b.title) || (/^Examen du /.test(b.title) && examOver(subjOf(S, b.subj) || {})) || taskDone(b));
   const running = S.focus && S.focus.run && S.focus.run.start ? S.focus.run : null;
   // (a chrono forgotten for hours stops holding the blocks after 4 h)
   const underRun = s => running && s.endT > running.start && s.startT < nowT && s.startT < running.start + 4 * 3600e3;
@@ -1072,11 +1076,21 @@ function generate(S0, weekStart, now) {
     const su = s.subj ? subjOf(S, s.subj) : null;
     x.ev.push({ kind: 'study', start: s.start, end: s.end, title: s.title || 'Étude', sub: [su ? su.name : '', s.campus ? 'à l’EPFL' : '', s.catchup && !s.bl ? 'rattrapage' : ''].filter(Boolean).join(' · '), subj: s.subj, id: s.id, state: s.state, serie: !!s.serie, corr: !!s.corr, late: !!s.late, catchup: !!s.catchup && !s.bl, bl: s.bl || null, len: s.len, part: s.part, underRun: s.underRun });
   }
-  // a fixed block (exercise session…) you skipped to work on something else with the chrono:
-  // the block you did takes its place on screen; its série time already went back to the blocks ahead
+  // a block you ticked that has since moved a few minutes (the day shifted around it): its tick is kept, and the
+  // block now sitting where you did it is not asked about again
+  const ghosts = {};
+  { const seen = new Set(); for (const x of days) for (const e of x.ev) if (e.id) seen.add(e.id);
+    for (const [id, r] of Object.entries(doneMap)) {
+      if (seen.has(id) || !r || typeof r !== 'object' || r.k || !r.s || !/-study$/.test(id) || !days[r.d]) continue;
+      const st = r.focus && r.rs != null ? r.rs : (r.a != null ? r.a : +id.split('-')[1]), ln = Math.round(r.p ? r.m / r.p : r.m) || 0;
+      if (st >= 0 && ln > 0) (ghosts[r.d] = ghosts[r.d] || []).push({ start: st, end: st + ln, subj: r.s });
+    } }
+  // a block (exercise session, or one that moved) you skipped while doing something else at that time:
+  // the block you did takes its place on screen; its time already went back to the blocks ahead
   for (const x of days) {
-    const did = x.ev.filter(e => e.kind === 'study' && e.state === 'done' && !e.fixed);
-    x.ev = x.ev.filter(e => !(e.kind === 'study' && e.fixed && e.state === 'missed' && did.some(o => Math.min(o.end, e.end) - Math.max(o.start, e.start) >= (e.end - e.start) * .4)));
+    const did = x.ev.filter(e => e.kind === 'study' && e.state === 'done' && !e.fixed), gh = ghosts[x.d] || [];
+    const covers = (o, e) => Math.min(o.end, e.end) - Math.max(o.start, e.start) >= (e.end - e.start) * .4;
+    x.ev = x.ev.filter(e => !(e.kind === 'study' && e.state === 'missed' && ((e.fixed && did.some(o => covers(o, e))) || gh.some(o => covers(o, e)))));
   }
   // a marker after the last série block of each subject: the série should be finished by then
   if (S.coursesOn) for (const su of S.subjects) {

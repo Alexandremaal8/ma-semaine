@@ -314,3 +314,23 @@ console.log('focus OK');
   assert.ok(ls && (!fc || fc.t > ls.t), 'not finished: série first, correction after');
   console.log('finish before correction OK');
 }
+{
+  // a correction ticked, then the day shifts under it: it doesn't come back as "pas fait"; nor do the earlier missed ones
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 16)), key = L.iso(ws); S.done[key] = {};
+  for (const x of L.generate(S, ws, new Date(2026, 10, 21, 23))) for (const e of x.ev) if (e.kind === 'study' && x.d < 6 && !e.corr) S.done[key][e.id] = { s: e.subj, t: e.title, m: e.end - e.start, d: x.d, a: e.start, serie: e.serie, fx: !!e.fixed };
+  const g0 = L.generate(S, ws, new Date(2026, 10, 22, 13));
+  const cs = g0[6].ev.filter(e => e.corr && e.state === 'todo');
+  assert.ok(cs.length >= 2, 'corrections planned on Sunday');
+  for (const e of cs) S.done[key][e.id] = { s: e.subj, t: e.title, m: e.end - e.start, d: 6, a: e.start, serie: true, c: true };
+  // something new early in the afternoon pushes the slots
+  S.events.push({ id: 'ev1', date: '2026-11-22', start: 805, end: 830, title: 'Appel' });
+  for (const h of [17, 20, 23]) {
+    const g = L.generate(S, ws, new Date(2026, 10, 22, h));
+    const bad = g.flatMap(x => x.ev.filter(e => e.kind === 'study' && e.state === 'missed' && /correction/.test(e.title)).map(e => x.d + ' ' + e.subj));
+    assert.deepEqual(bad.filter(b => cs.some(c => b.endsWith(c.subj))), [], 'ticked corrections never come back: ' + bad);
+    const todo = g.flatMap(x => x.ev.filter(e => e.corr && e.state === 'todo' && cs.some(c => c.subj === e.subj)));
+    assert.equal(todo.length, 0, 'and none planned again');
+  }
+  console.log('ticked corrections stay ticked OK');
+}
