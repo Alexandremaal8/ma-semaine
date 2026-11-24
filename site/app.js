@@ -1360,7 +1360,7 @@ function foStart(opt) {
   if (cur) { toast('Un focus tourne déjà : termine-le d’abord'); foOpen(); return; }
   beginChange();
   unlockAudio(); keepAwake(true); foLastPhase = '';
-  const run = FO().run = { id: opt.id || null, wk: opt.wk || null, subj: opt.subj || null, title: opt.title || 'Focus libre', plan: opt.plan || 0, start: Date.now(), paused: 0, pauseAt: null, pomo: !!opt.pomo, fixed: !!opt.fixed };
+  const run = FO().run = { id: opt.id || null, wk: opt.wk || null, subj: opt.subj || null, title: opt.title || 'Focus libre', plan: opt.plan || 0, start: Date.now(), paused: 0, pauseAt: null, pomo: !!opt.pomo, fixed: !!opt.fixed, serie: !!opt.serie, bl: opt.bl || null };
   const sw = opt.swap;
   if (sw) {
     // a later block taken now: it goes in the slot of the block that was planned now, which moves later
@@ -1476,7 +1476,7 @@ function foStop(finished, after) {
     } else if (!r.id && r.subj) {
       // free session: it shows in the day and counts for that subject
       const st = new Date(r.start), sm = st.getHours() * 60 + st.getMinutes();
-      d['f-' + r.start] = { s: r.subj, t: r.title, m: min, d: dow(st), a: Math.floor(sm / 5) * 5, free: true, focus: true };
+      d['f-' + r.start] = Object.assign({ s: r.subj, t: r.title, m: min, d: dow(st), a: Math.floor(sm / 5) * 5, free: true, focus: true, rs: sm }, r.serie ? { serie: true } : {}, r.bl ? { b: r.bl, serie: /s[ée]rie/i.test(r.title) || undefined } : {});
     }
   }
   const more = after && min >= 3 ? after(r, min) : '';
@@ -1507,6 +1507,8 @@ function renderFocus() {
     h += first ? `<div class="sec-t">Maintenant</div><div class="group">${foBlockRow(first, s.wk, true)}</div>` : `<div class="group"><div class="empty">Plus de bloc prévu aujourd’hui. Tu peux lancer un focus libre.</div></div>`;
     const rest = s.todo.slice(1, 6).concat(s.missed.slice(0, 3));
     if (rest.length) h += `<div class="sec-t">Aujourd’hui</div><div class="group">${rest.map(e => foBlockRow(e, s.wk)).join('')}</div>`;
+    const so = foSerieOpts(s.wk);
+    if (so.length) h += `<div class="sec-t">Avancer une série ou un retard</div><div class="group">${so.map(o => `<div class="li fo-row" style="--c:${esc(o.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(o.label)} · ${esc(o.name)}</span><span class="su">${esc(o.line)}</span></span><button type="button" class="fo-play" data-act="foSerieGo" data-v="${esc(o.bl || o.subj)}" aria-label="Lancer"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></button></div>`).join('')}</div>`;
     h += `<div class="fo-opts"><label class="fo-pomo"><input type="checkbox" id="foPomo" ${state.focusPomo ? 'checked' : ''}> <span><b>Pomodoro</b> · 25 min de focus, 5 min de pause</span></label></div>
       <div class="btns"><button type="button" class="btn" data-act="foFree">Focus libre</button></div>`;
   }
@@ -1553,6 +1555,12 @@ function foStaleCheck() {
 function foEndSheet() {
   const r = foRun(); if (!r) return;
   const min = Math.round(foElapsed(r) / 6e4);
+  if (!r.id && r.bl && min >= 3) {
+    openSheet('Fin du focus', `<p style="margin:0 0 14px;color:var(--muted)">${esc(r.title)} · ${hm(Math.max(1, min))} de travail.</p>
+      <div class="btns" style="flex-direction:column;align-items:stretch;padding:0"><button type="button" class="btn pri" data-act="foStopBl" data-v="1">Fini ✓ · l’enlever du retard</button><button type="button" class="btn" data-act="foStopBl" data-v="0">Pas encore fini</button></div>`);
+    return;
+  }
+  if (!r.id && r.serie && r.subj && min >= 3) { const sc = serieCtx({ kind: 'study', subj: r.subj, serie: true, title: 'Série' }, iso(mondayOf(new Date(r.start)))); if (sc) { serieSheet(sc, { r, min }); return; } }
   if (!r.id) { foStop(true); return; }
   const fb = r.wk ? findBlock(r.wk, r.swap ? r.swap.id : r.id) : null, sc = fb && min >= 3 ? serieCtx(fb.e, r.wk) : null;
   if (sc) { serieSheet(sc, { r, min }); return; }
@@ -1606,6 +1614,27 @@ function serieProgLine(e, wk) {
   const p = sc.pr;
   const left = p ? Math.max(0, L.serieMinOf(state, wk, subjOf(state, sc.subj)) - L.serieSpent(state, wk, sc.subj).all) : 0;
   return `<div class="md-links"><button type="button" class="linkbtn mini" data-act="foSerie" data-w="${esc(wk)}" data-v="${esc(e.id)}">${p ? `Exo ${Math.min(p.k + 1, p.n)}/${p.n} · reste ≈ ${hm(Math.max(15, Math.round(left / 5) * 5))}` : 'Où j’en suis'}</button></div>`;
+}
+// the séries of the week not finished yet, to work on any of them now (the time counts for the série)
+function foSerieOpts(wk) {
+  const num = L.semWeek(state, fromIso(wk)), sd = (state.serieDone || {})[wk] || {};
+  const late = L.backlogOpen(state).filter(x => x.subj && subjOf(state, x.subj)).map(x => { const su = subjOf(state, x.subj);
+    return { bl: x.id, subj: x.subj, name: su.name, color: su.color || 'var(--acc)', label: x.title, line: 'en retard' + (x.left >= 10 ? ` · reste ≈ ${hm(Math.round(x.left / 5) * 5)}` : '') }; });
+  if (!num) return late;
+  return late.concat(state.subjects.filter(su => su.serie && !sd[su.id]).map(su => {
+    const p = ((state.serieProg || {})[wk] || {})[su.id], left = Math.max(0, L.serieMinOf(state, wk, su) - L.serieSpent(state, wk, su.id).all);
+    return { subj: su.id, name: su.name, color: su.color || 'var(--acc)', num, left,
+      label: `Série ${num}`, line: (p ? `Exo ${Math.min(p.k + 1, p.n)}/${p.n} · ` : '') + (left >= 10 ? `reste ≈ ${hm(Math.round(left / 5) * 5)}` : 'presque finie') + ' · compte pour la série' };
+  }));
+}
+function foSerieGoSheet(v) {
+  const wk = iso(mondayOf(new Date())), o = foSerieOpts(wk).find(x => (x.bl || x.subj) === v), su = o && subjOf(state, o.subj); if (!su || !o) return;
+  openSheet(`${esc(o.label)} · ${esc(su.name)}`, `<p class="hint" style="margin:-4px 0 12px;padding:0">${o.bl ? 'Le temps compte pour ce retard. À la fin, tu dis si c’est fini : il sort alors de la liste.' : 'Le temps compte pour ta série : les blocs prévus plus tard pour elle raccourcissent. À la fin, l’app te demande à quel exo tu es arrivé.'}</p>
+    <div class="btns" style="flex-direction:column;align-items:stretch;padding:0">${[[25, '25 min'], [50, '50 min'], [90, '1h30'], [0, 'Pas de limite']].map(([v, t]) => `<button type="submit" class="btn${v === 50 ? ' pri' : ''}" value="${v}">${t}</button>`).join('')}</div>`, (fd, btn) => {
+    const plan = btn ? +btn.value || 0 : 50;
+    setTimeout(() => foStart(o.bl ? { subj: o.subj, title: o.label, plan, pomo: !!state.focusPomo, bl: o.bl } : { subj: o.subj, title: `${o.label} · avance`, plan, pomo: !!state.focusPomo, serie: true }), 350);
+    return true;
+  });
 }
 function foFreeSheet() {
   openSheet('Focus libre', `<div class="fields">${F.select('subj', 'Matière', subjOpts(), (state.subjects[0] || {}).id)}${F.text('title', 'Sur quoi ?', '', 'full', 'ex. Fiche résumé, exos en plus…')}${F.select('plan', 'Durée visée', [[0, 'Pas de limite'], [25, '25 min'], [50, '50 min'], [90, '1h30']], 50)}</div><div class="sh-actions"><button type="submit" class="btn pri">Lancer</button></div>`, fd => {
@@ -1669,6 +1698,8 @@ function focusAction(a, v, b) {
     case 'foStop': closeSheet(); setTimeout(() => foStop(v === '1'), 250); return true;
     case 'foCancel': foCancel(); return true;
     case 'foFree': foFreeSheet(); return true;
+    case 'foSerieGo': foSerieGoSheet(v); return true;
+    case 'foStopBl': { const r = foRun(), it = r && (state.backlog || []).find(x => x.id === r.bl); closeSheet(); foStop(v === '1', () => { if (v === '1' && it) { it.done = true; it.doneAt = Date.now(); return `« ${it.title} » sort du retard.`; } return ''; }); return true; }
   }
   return false;
 }
@@ -1849,7 +1880,7 @@ function poseSvg(name, cls = '') {
   return `<svg class="pose ${cls}" viewBox="0 -4 120 66" aria-hidden="true"><line class="gnd" x1="2" y1="58.5" x2="118" y2="58.5"/><g class="prop">${P.props || ''}</g>${cable}${legs2}${line('n', 'p')}${line('p', 'k')}${line('k', 'f')}${line('n', 'e')}${line('e', 'w')}<circle r="4.6" cx="${fr[0].h[0]}" cy="${fr[0].h[1]}">${an('cx', loop.map(f => f.h[0]))}${an('cy', loop.map(f => f.h[1]))}</circle></svg>`;
 }
 self.__sp = { poseSvg: (...a) => poseSvg(...a), POSES };
-self.__app = { get state() { return state; }, stretch: (d) => { stretchSheet(d, iso(mondayOf(new Date())), "t"); },  save: () => save(), syncAll: () => syncAll(), pull: f => pull(f), foStop: f => foStop(f) };
+self.__app = { get state() { return state; }, render: () => renderAll(), stretch: (d) => { stretchSheet(d, iso(mondayOf(new Date())), "t"); },  save: () => save(), syncAll: () => syncAll(), pull: f => pull(f), foStop: f => foStop(f) };
 const MOVE_POSE = [[/cercles de bras|rotations des épaules/i, 'armcircle', 'rotation épaules échauffement'], [/jumping/i, 'jacks', 'jumping jacks'], [/cercles de poignets/i, 'wristcircle', 'échauffement poignets'],
   [/chat-vache/i, 'catcow', 'chat vache étirement cat cow'], [/bird dog/i, 'birddog', 'bird dog exercice'], [/poignets à quatre/i, 'wristquad', 'renforcement poignets à quatre pattes wrist prep'],
   [/poignets forts/i, 'wristflex', 'renforcement poignets sans matériel'], [/poignets/i, 'wriststretch', 'étirement poignets avant-bras'], [/enfant/i, 'child', 'posture de l’enfant yoga'],

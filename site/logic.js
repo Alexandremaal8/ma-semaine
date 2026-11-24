@@ -1090,7 +1090,7 @@ function generate(S0, weekStart, now) {
   for (const x of days) {
     const did = x.ev.filter(e => e.kind === 'study' && e.state === 'done' && !e.fixed), gh = ghosts[x.d] || [];
     const covers = (o, e) => Math.min(o.end, e.end) - Math.max(o.start, e.start) >= (e.end - e.start) * .4;
-    x.ev = x.ev.filter(e => !(e.kind === 'study' && e.state === 'missed' && ((e.fixed && did.some(o => covers(o, e))) || gh.some(o => covers(o, e)))));
+    x.ev = x.ev.filter(e => !(e.kind === 'study' && e.state === 'missed' && (did.some(o => covers(o, e)) || gh.some(o => covers(o, e)))));
   }
   // a marker after the last série block of each subject: the série should be finished by then
   if (S.coursesOn) for (const su of S.subjects) {
