@@ -113,7 +113,19 @@ const dow = d => (d.getDay() + 6) % 7;
 const subjOf = (S, id) => S.subjects.find(x => x.id === id);
 /* Semester week ("semaine 9"): counted from S.semStart; the série of week N is série N */
 // time a série takes: the estimate read from that week's PDF (when Moodle gave one), else the subject's usual time
-const serieMinOf = (S, wk, su) => { if (!su || !su.serie) return 0; const e = ((S.serieEst || {})[wk] || {})[su.id]; return e > 0 ? e : +su.serie || 0; };
+/* No série this week for a subject: during the real part of its project (the course stops the séries to leave
+ * room for it), unless a série for that week shows up on Moodle. You can always say otherwise for a week. */
+function projOn(S, weekStart, subj) {
+  const ws = mondayOf(weekStart), we = addDays(ws, 6);
+  return (S.projects || []).find(p => p.subj === subj && p.main && p.to && mondayOf(fromIso(p.main)) <= ws && fromIso(p.to) >= ws && fromIso(p.main) <= we) || null;
+}
+function serieOff(S, weekStart, su) {
+  if (!su || !su.serie) return false;
+  const wk = iso(mondayOf(weekStart)), o = ((S.serieOff || {})[wk] || {})[su.id];
+  if (o === true || o === false) return o;
+  return !!projOn(S, weekStart, su.id) && !((S.serieSeen || {})[wk] || {})[su.id];
+}
+const serieMinOf = (S, wk, su) => { if (!su || !su.serie || serieOff(S, typeof wk === 'string' ? fromIso(wk) : wk, su)) return 0; const e = ((S.serieEst || {})[wk] || {})[su.id]; return e > 0 ? e : +su.serie || 0; };
 function semWeek(S, weekStart) {
   if (!S.semStart) return null;
   const n = Math.round((mondayOf(weekStart) - mondayOf(fromIso(S.semStart))) / (7 * 864e5)) + 1;
@@ -347,6 +359,10 @@ function layoutDay(S, m, weekStart, d) {
   ev.push({ kind: 'stretch', start: wake, end: wake + 5, title: 'Stretching · 5 min', sub: STRETCH[d].name });
   courses.forEach(c => { const su = subjOf(S, c.subj);
     // exercise sessions are when the série gets done: a série block (checkable, counted in the série's time)
+    if (c.type === 'Exercices' && su && su.serie && serieOff(S, weekStart, su)) { const p = projOn(S, weekStart, su.id);
+      if (p && dIso <= p.to) ev.push({ kind: 'fixed', start: c.start, end: c.end, title: p.title + ' · à la place des exos', subj: c.subj, fsub: [su.name, c.room].filter(Boolean).join(' · '), pid: p.id, cid: c.id, room: c.room || '' });
+      else ev.push({ kind: 'course', start: c.start, end: c.end, title: su.name, sub: ['Exercices · pas de série cette semaine', c.room].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, cid: c.id, room: c.room || '' });
+      return; }
     if (c.type === 'Exercices' && su && su.serie) { ev.push({ kind: 'fixed', exo: true, start: c.start, end: c.end, title: 'Séance d’exercices', subj: c.subj, fsub: [su.name, c.room].filter(Boolean).join(' · '), cid: c.id, room: c.room || '' }); return; }
     if (c.type === 'Examen blanc') { ev.push({ kind: 'course', start: c.start, end: c.end, title: 'Examen blanc · ' + (su ? su.name : ''), sub: [c.room, 'bonne chance !'].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, room: c.room || '', mock: true }); return; }
     if (c.type === 'Examen') { ev.push({ kind: 'course', start: c.start, end: c.end, title: 'Examen · ' + (su ? su.name : ''), sub: [c.room, 'bonne chance !'].filter(Boolean).join(' · '), subj: c.subj, ctype: c.type, room: c.room || '', exam: true }); return; }
@@ -476,7 +492,7 @@ function corrAvail(S, weekStart, su) {
   if (seen) { const d = fromIso(seen), floor = addDays(weekStart, last + 1); if (d < planned) return d < floor ? floor : d; }
   return planned;
 }
-const corrDeferred = (S, weekStart, su) => { const a = corrAvail(S, weekStart, su); return !!a && a >= addDays(weekStart, 7); };
+const corrDeferred = (S, weekStart, su) => { if (serieOff(S, weekStart, su)) return false; const a = corrAvail(S, weekStart, su); return !!a && a >= addDays(weekStart, 7); };
 
 /* Where you are in a série. kDone = exercises finished out of n; per = minutes per exercise read in the PDF.
  * Your real pace on the part done predicts the rest; the planner gets the new total so exactly `rem`
@@ -584,7 +600,7 @@ function generate(S0, weekStart, now) {
     const deferred = corrDeferred(S0, weekStart, su);
     const fromPrev = prevCfg.coursesOn && su.serie && corrDeferred(S0, prevWs, su) ? (+su.corr || 0) : 0;
     corrPrev[su.id] = !!fromPrev;
-    const c = (S.coursesOn && su.serie && !deferred ? (+su.corr || 0) : 0) + fromPrev;
+    const c = (S.coursesOn && su.serie && !deferred && !serieOff(S0, weekStart, su) ? (+su.corr || 0) : 0) + fromPrev;
     const av = corrAvail(S0, weekStart, su);
     corrFrom[su.id] = fromPrev && !(S.coursesOn && su.serie && !deferred) ? null : (av && !deferred ? av : null);
     const sDone = !!((S.serieDone || {})[key] || {})[su.id];
@@ -1415,6 +1431,6 @@ function sportProgress(S, id, done) {
   return { lvl, target, note, up: lvl > cur.lvl || target > cur.target };
 }
 
-const API = { CHRONO_GRACE, serieReport, serieSpent, inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
+const API = { CHRONO_GRACE, serieReport, serieSpent, serieOff, projOn, inSemester, EXAM_CAMPAIGN, EXAM_PASSES, examDays, examPass, serieMinOf, mockPrepBudget, SPORT, sportLevel, sportProgress, parseAnnounce, moodleTokens, corrAvail, STRETCH, semWeek, backlogScore, backlogOpen, backlogTotal, backlogCredit, coursesOnFor, freezePast, tripOn, weekCfg, recommendMode, DAYS, DAYS_S, MONTHS, MONTHS_L, MODE_ORDER, MODE_META, MODE_DEFAULTS, SPORT_MIN, SPORT_MAX, clone, pad, fmt, parseT, hm, addDays, iso, fromIso, mondayOf, dateLbl, uid, dow, defaultState, normalize, subjOf, sportMinutes, generate, summarize, buildNotifications, buildAgenda };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Semaine = API;
 })(typeof self !== 'undefined' ? self : this);

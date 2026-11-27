@@ -894,6 +894,11 @@ function mdEstimates() {
   for (const ws of [mondayOf(new Date()), addDays(mondayOf(new Date()), 7)]) {
     const wk = iso(ws); if (!L.coursesOnFor(state, ws)) continue;
     const n = L.semWeek(state, ws);
+    // a série posted on Moodle for this week: there is one, even during a project
+    for (const su of state.subjects) if (su.serie && n && mdFiles(su.id).some(i => i.kind === 'serie' && i.num === n)) {
+      state.serieSeen = state.serieSeen || {}; const m = state.serieSeen[wk] = state.serieSeen[wk] || {};
+      if (!m[su.id]) { m[su.id] = true; if (L.projOn(state, ws, su.id)) changed.push(su.name + ' : série ' + n + ' publiée'); }
+    }
     for (const su of state.subjects) {
       if (!su.serie || ((state.serieDone || {})[wk] || {})[su.id] || ((state.serieProg || {})[wk] || {})[su.id]) continue;
       const it = mdFiles(su.id).find(i => i.kind === 'serie' && i.num === n && i.est && i.est.minutes > 0); if (!it) continue;
@@ -1621,7 +1626,7 @@ function foSerieOpts(wk) {
   const late = L.backlogOpen(state).filter(x => x.subj && subjOf(state, x.subj)).map(x => { const su = subjOf(state, x.subj);
     return { bl: x.id, subj: x.subj, name: su.name, color: su.color || 'var(--acc)', label: x.title, line: 'en retard' + (x.left >= 10 ? ` · reste ≈ ${hm(Math.round(x.left / 5) * 5)}` : '') }; });
   if (!num) return late;
-  return late.concat(state.subjects.filter(su => su.serie && !sd[su.id]).map(su => {
+  return late.concat(state.subjects.filter(su => su.serie && !sd[su.id] && !L.serieOff(state, fromIso(wk), su)).map(su => {
     const p = ((state.serieProg || {})[wk] || {})[su.id], left = Math.max(0, L.serieMinOf(state, wk, su) - L.serieSpent(state, wk, su.id).all);
     return { subj: su.id, name: su.name, color: su.color || 'var(--acc)', num, left,
       label: `Série ${num}`, line: (p ? `Exo ${Math.min(p.k + 1, p.n)}/${p.n} · ` : '') + (left >= 10 ? `reste ≈ ${hm(Math.round(left / 5) * 5)}` : 'presque finie') + ' · compte pour la série' };
@@ -2070,11 +2075,16 @@ function renderBacklog() {
   const proj = L.generate(state, ws, new Date(addDays(ws, 7).getTime() - 1000)).meta.unfinished || {}, wkN = L.semWeek(state, ws), wkKey = iso(ws);
   // every série not ticked this week, even the ones whose planned time is already spent (the time doesn't say it's finished)
   const ticked = (state.serieDone || {})[wkKey] || {};
-  const openS = L.generate(state, ws).meta.cfg.coursesOn === false ? [] : state.subjects.filter(su => su.serie && !ticked[su.id]).map(su => [su.id, proj[su.id] || { left: 0, corr: 0 }]);
+  const cOn = L.generate(state, ws).meta.cfg.coursesOn !== false;
+  const openS = !cOn ? [] : state.subjects.filter(su => su.serie && !ticked[su.id] && !L.serieOff(state, ws, su)).map(su => [su.id, proj[su.id] || { left: 0, corr: 0 }]);
+  const offS = !cOn ? [] : state.subjects.filter(su => L.serieOff(state, ws, su));
   const week = (M.lateMin >= 15 ? `<div class="notice"><span><b>Cette semaine : ${hm(M.lateMin)} pas faits</b>, déjà replacés dans ta semaine. Ce qui ne sera pas fait dimanche soir arrivera ici.</span></div>` : '')
     + (openS.length ? `<div class="sec-t">Séries de cette semaine pas encore finies</div><div class="group">${openS.map(([k, u]) => { const su = subjOf(state, k), pr = ((state.serieProg || {})[wkKey] || {})[k];
         return `<div class="li" style="--c:${esc(su.color)}"><span class="dt"></span><span class="bd"><span class="ti">Série ${wkN || ''} · ${esc(su.name)}</span><span class="su">${pr ? 'exo ' + Math.min(pr.k + 1, pr.n) + '/' + pr.n + ' · ' : ''}${u.left - u.corr >= 15 ? 'reste ≈ ' + hm(Math.round((u.left - u.corr) / 5) * 5) + ' · arrive ici lundi si pas finie' : 'temps prévu fait, mais pas cochée : dis où tu en es'}</span></span><button type="button" class="linkbtn mini" data-act="foSerieC" data-w="${wkKey}" data-v="${esc(k)}">Où j’en suis</button></div>`; }).join('')}</div>
-      <p class="hint" style="margin:6px 0 12px">Le reste est estimé au temps passé. Dis où tu en es pour que ce soit exact (ou « Série finie ✓ »).</p>` : '');
+      <p class="hint" style="margin:6px 0 12px">Le reste est estimé au temps passé. Dis où tu en es pour que ce soit exact (ou « Série finie ✓ »). Pas de série cette semaine dans une matière ? <a href="#" class="inl" data-act="serieOffPick">Le dire</a></p>` : '')
+    + (offS.length ? `<div class="sec-t">Pas de série cette semaine</div><div class="group">${offS.map(su => { const p = L.projOn(state, ws, su.id);
+        return `<div class="li" style="--c:${esc(su.color)}"><span class="dt"></span><span class="bd"><span class="ti">${esc(su.name)}</span><span class="su">${p ? esc(p.title) + ' à la place · la séance d’exos compte pour le projet' : 'rien de prévu pour la série'}</span></span><button type="button" class="btn sm" data-act="serieOff" data-v="${esc(su.id)}|0">Il y en a une</button></div>`; }).join('')}</div>
+      <p class="hint" style="margin:6px 0 12px">Si une série sort quand même sur Moodle, l’app la reprend toute seule.</p>` : '');
   const manual = state.blOrder === 'manual';
   const rows = open.map((x, idx) => {
     const su = subjOf(state, x.subj), nx = M.blNext[x.id];
@@ -2303,6 +2313,12 @@ document.addEventListener('click', async e => {
     case 'revDocs': revDocsSheet(v, b.dataset.d, b.dataset.id); return;
     case 'exDocs': exDocsSheet(v, b.dataset.w); return;
     case 'dayPlan': planSheet(); return;
+    case 'serieOff': { const [subj, on] = v.split('|'), wk = iso(mondayOf(new Date())); beginChange();
+      state.serieOff = state.serieOff || {}; (state.serieOff[wk] = state.serieOff[wk] || {})[subj] = on === '1';
+      for (const k of Object.keys(state.serieOff).sort().slice(0, -8)) delete state.serieOff[k];
+      closeSheet(); save(); renderAll(); endChange(on === '1' ? 'Pas de série cette semaine' : 'Série remise', on === '1' ? 'Son temps de série et sa correction sont libérés.' : 'Elle revient dans ta semaine.'); return; }
+    case 'serieOffPick': { const ws = mondayOf(new Date()), list = state.subjects.filter(su => su.serie && !L.serieOff(state, ws, su));
+      openSheet('Pas de série cette semaine', `<p class="hint" style="margin:-4px 0 12px;padding:0">Dans quelle matière ? Son temps de série et sa correction sont libérés pour cette semaine seulement.</p><div class="btns" style="flex-direction:column;align-items:stretch;padding:0">${list.map(su => `<button type="button" class="btn" data-act="serieOff" data-v="${esc(su.id)}|1">${esc(su.name)}</button>`).join('')}</div>`); return; }
     case 'blNotDone': {
       const it = (state.backlog || []).find(x => x.id === v); if (!it) return;
       const wk = iso(mondayOf(new Date((it.created || Date.now()) - 864e5)));

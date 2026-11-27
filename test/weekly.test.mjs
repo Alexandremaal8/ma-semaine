@@ -334,3 +334,20 @@ console.log('focus OK');
   }
   console.log('ticked corrections stay ticked OK');
 }
+{
+  // no série during the real part of a project, unless Moodle posts one or you say so
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  S.projects = [{ id: 'p1', subj: 'prog', title: 'Mini-projet 2', from: '2026-11-09', main: '2026-11-25', to: '2026-12-17', hours: 20, group: true, sessions: [] }];
+  const ws = L.mondayOf(new Date(2026, 10, 30)), key = L.iso(ws);
+  const progSerie = g => g.reduce((a, x) => a + x.ev.filter(e => e.subj === 'prog' && e.kind === 'study' && e.serie).reduce((b, e) => b + e.end - e.start, 0), 0);
+  let g = L.generate(S, ws, ws);
+  assert.equal(progSerie(g), 0, 'no prog série during the project');
+  assert.ok(g.some(x => x.ev.some(e => e.pid === 'p1' && /place des exos/.test(e.title))), 'the exercise session is project time');
+  assert.ok(progSerie(L.generate(S, L.mondayOf(new Date(2026, 10, 16)), L.mondayOf(new Date(2026, 10, 16)))) > 0, 'séries before the project still there');
+  S.serieSeen = { [key]: { prog: true } };
+  assert.ok(progSerie(L.generate(S, ws, ws)) > 0, 'a série posted on Moodle comes back');
+  S.serieSeen = {}; S.serieOff = { [key]: { prog: false, alg: true } };
+  g = L.generate(S, ws, ws);
+  assert.ok(progSerie(g) > 0 && !g.some(x => x.ev.some(e => e.subj === 'alg' && e.kind === 'study' && e.serie)), 'your word wins, both ways');
+  console.log('no série during the project OK');
+}
