@@ -52,7 +52,7 @@ function mergeStates(remote, local) {
     const out = R.done[wk] = R.done[wk] || {};
     for (const [id, v] of Object.entries(recs || {})) { const o = out[id]; if (!o || (o.live && !v.live) || (typeof v === 'object' && typeof o === 'object' && !(v.live && !o.live))) out[id] = v; }
   }
-  for (const k of ['serieProg', 'serieEst', 'serieDone', 'corrSeen', 'corrMan', 'revDone', 'examDone', 'mdNames']) {
+  for (const k of ['serieProg', 'serieEst', 'serieDone', 'corrSeen', 'corrMan', 'revDone', 'examDone', 'mdNames', 'serieOff', 'serieSeen']) {
     if (!local[k]) continue; R[k] = R[k] || {};
     for (const [wk, m] of Object.entries(local[k])) R[k][wk] = m && typeof m === 'object' && !Array.isArray(m) ? Object.assign({}, R[k][wk] || {}, m) : m;
   }
@@ -139,16 +139,37 @@ async function syncAll() {
     return;
   }
   try {
+    // the phone can drop its notification address (iOS does, now and then): the server then forgets it and
+    // nothing arrives any more. Check it every few hours and make a new one when needed.
+    if (onceFor('subok', sub.endpoint, 180)) {
+      const ck = await (await post('/subok', { subscription: sub.toJSON() })).json().catch(() => ({}));
+      if (ck.dead) { await renewSub(sub); return; }
+      if (ck.stored === false) lsSet(LS + '-sent-sync', '');
+    }
     const notifications = L.buildNotifications(state, new Date(), 14);
     if (!onceFor('sync', { e: sub.endpoint, notifications, k: syncKey() }, 360)) return;
     const r = await post('/sync', { subscription: sub.toJSON(), notifications, backup: onceFor('backup', 1, 1440) ? state : undefined, syncKey: syncKey() || undefined });
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    const rj = await r.clone().json().catch(() => ({})); if (rj.dead) { await renewSub(sub); return; }
     localStorage.setItem(LS + '-sync', JSON.stringify({ t: Date.now(), n: notifications.length }));
     if (tab === 'set') renderSet();
   } catch (e) { console.warn('sync', e); }
 }
 const b64ToBytes = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const b = atob(s); return Uint8Array.from(b, c => c.charCodeAt(0)); };
-async function enableNotifs() {
+let renewing = false;
+async function renewSub(old) {
+  if (renewing) return; renewing = true;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    try { await old.unsubscribe(); } catch (e) { }
+    const { publicKey } = await (await fetch(WORKER + '/vapid')).json();
+    await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+    lsSet(LS + '-sent-sync', ''); lsSet(LS + '-sent-subok', ''); lsSet(LS + '-notifBroken', '');
+    renewing = false; await syncAll();
+  } catch (e) { console.warn('renew', e); lsSet(LS + '-notifBroken', '1'); renderToday(); }
+  renewing = false;
+}
+async function enableNotifs(fresh) {
   if (isIOS && !standalone()) { toast('Ajoute d’abord l’app à ton écran d’accueil'); return; }
   if (!('Notification' in window) || !('serviceWorker' in navigator)) { toast('Notifs pas disponibles ici'); return; }
   const perm = await Notification.requestPermission();
@@ -157,11 +178,12 @@ async function enableNotifs() {
   try {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
+    if (sub && fresh) { try { await sub.unsubscribe(); } catch (e) { } sub = null; }
     if (!sub) {
       const { publicKey } = await (await fetch(WORKER + '/vapid')).json();
       sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
     }
-    state.notif.on = true; save(); await syncAll();
+    state.notif.on = true; save(); lsSet(LS + '-notifBroken', ''); lsSet(LS + '-sent-sync', ''); lsSet(LS + '-sent-subok', ''); await syncAll();
     await post('/test', { subscription: sub.toJSON() });
     toast('C’est bon ! Une notif de test arrive.');
   } catch (e) { console.warn(e); toast('Échec : ' + (e.message || e)); }
@@ -602,7 +624,8 @@ function renderToday() {
   }
   const st = main.filter(e => e.kind === 'study'), stDone = st.filter(e => e.state === 'done');
   const prog = st.length ? `<div class="prog"><span><b>${stDone.length}/${st.length}</b> blocs</span><span class="track"><i style="width:${stDone.length / st.length * 100}%"></i></span><span class="num">${hm(day.dn)} / ${hm(day.plan)}</span></div>` : '';
-  const notice = !state.notif.on && isToday && APP === 'main' ? `<div class="notice"><span>Les rappels sont coupés.</span><button type="button" data-act="goSet">Activer</button></div>` : '';
+  const notice = !isToday || APP !== 'main' ? '' : !state.notif.on ? `<div class="notice"><span>Les rappels sont coupés.</span><button type="button" data-act="goSet">Activer</button></div>`
+    : lsGet(LS + '-notifBroken') ? `<div class="notice"><span>Les rappels ne passent plus sur ce téléphone.</span><button type="button" data-act="notifFix">Réparer</button></div>` : '';
 
   const rows = [`<div class="it k-minor"><span class="tm">${fmt(day.wake)}</span><span class="minor">Réveil</span></div>`];
   for (const e of main) {
@@ -2402,6 +2425,7 @@ document.addEventListener('click', async e => {
     case 'editTrip': editTrip(v); return;
     case 'weekSheet': weekSheet(); return;
     case 'goSet': showTab('set'); return;
+    case 'notifFix': enableNotifs(true); return;
     case 'calm': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + (+v), 1); renderCal(); return;
     case 'calday': calSel = v; keepScroll(renderCal); return;
     case 'openDay': selDate = calSel; showTab('today'); return;

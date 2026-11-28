@@ -34,3 +34,17 @@ const [t]=sent[0].auth.match(/t=([^,]+)/).slice(1); const [h,p,s]=t.split('.');
 const pub=await crypto.subtle.importKey('raw',unb(r1.publicKey),{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
 console.log('jwt ok',await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},pub,unb(s),enc.encode(h+'.'+p)), JSON.parse(Buffer.from(p,'base64url')).aud);
 const r3=await (await worker.fetch(new Request('https://w/test',{method:'POST',body:JSON.stringify({subscription:sub})}),env)).json(); console.log('test',r3);
+// the phone drops its address (410): the server remembers it, refuses it back, and says so to the app
+{
+  const ok1=await (await worker.fetch(new Request('https://w/subok',{method:'POST',body:JSON.stringify({subscription:sub})}),env)).json();
+  globalThis.fetch=async()=>new Response(null,{status:410});
+  await worker.fetch(new Request('https://w/sync',{method:'POST',body:JSON.stringify({subscription:sub,notifications:[{at:now+20*60e3,title:'C',body:'z'}]})}),env);
+  let w=[]; worker.scheduled({scheduledTime:now+20*60e3},env,{waitUntil:p=>w.push(p)}); await Promise.all(w);
+  const ok2=await (await worker.fetch(new Request('https://w/subok',{method:'POST',body:JSON.stringify({subscription:sub})}),env)).json();
+  const back=await (await worker.fetch(new Request('https://w/sync',{method:'POST',body:JSON.stringify({subscription:sub,notifications:[]})}),env)).json();
+  const sub2={...sub,endpoint:'https://web.push.apple.com/new'};
+  const fresh=await (await worker.fetch(new Request('https://w/sync',{method:'POST',body:JSON.stringify({subscription:sub2,notifications:[]})}),env)).json();
+  const good=ok1.stored&&!ok1.dead&&!ok2.stored&&ok2.dead&&back.dead&&!back.ok&&fresh.ok;
+  console.log(good?'dead address handled OK':'DEAD ADDRESS FAIL',JSON.stringify({ok1,ok2,back,fresh:fresh.ok}));
+  if(!good) process.exit(1);
+}

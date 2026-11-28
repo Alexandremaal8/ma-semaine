@@ -126,7 +126,9 @@ async function handle(req, env) {
   if (!validSub(data.subscription)) return json({ error: 'bad subscription' }, 400);
   const id = await sha(data.subscription.endpoint);
 
+  if (url.pathname === '/subok') return json({ stored: !!(await env.KV.get('sub:' + id)), dead: !!(await env.KV.get('dead:' + id)) });
   if (url.pathname === '/sync') {
+    if (await env.KV.get('dead:' + id)) return json({ ok: false, dead: true });
     const list = Array.isArray(data.notifications) ? data.notifications : [];
     const notifications = list.slice(0, 500).filter(n => n && Number.isFinite(n.at)).map(n => ({ at: n.at, title: String(n.title || '').slice(0, 120), body: String(n.body || '').slice(0, 240), tag: String(n.tag || '').slice(0, 60) }));
     const prev = await env.KV.get('sub:' + id, 'json');
@@ -164,7 +166,8 @@ async function tick(env, when) {
     for (const n of due) {
       try {
         const status = await sendPush(env, rec.subscription, n);
-        if (status === 404 || status === 410) { await env.KV.delete('sub:' + id); await env.KV.put('subs', JSON.stringify(subs.filter(x => x !== id))); break; }
+        // the phone dropped this address: remember it, so the app makes a new one instead of sending it back
+        if (status === 404 || status === 410) { await env.KV.put('dead:' + id, '1', { expirationTtl: 60 * 864e2 }); await env.KV.delete('sub:' + id); await env.KV.put('subs', JSON.stringify(subs.filter(x => x !== id))); break; }
       } catch (e) { console.log('push failed', e && e.message); }
     }
   }
