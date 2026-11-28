@@ -115,6 +115,7 @@ const subjOf = (S, id) => S.subjects.find(x => x.id === id);
 // time a série takes: the estimate read from that week's PDF (when Moodle gave one), else the subject's usual time
 /* No série this week for a subject: during the real part of its project (the course stops the séries to leave
  * room for it), unless a série for that week shows up on Moodle. You can always say otherwise for a week. */
+const CORR_T = /avec la correction|avec le corrigé/i;
 function projOn(S, weekStart, subj) {
   const ws = mondayOf(weekStart), we = addDays(ws, 6);
   return (S.projects || []).find(p => p.subj === subj && p.main && p.to && mondayOf(fromIso(p.main)) <= ws && fromIso(p.to) >= ws && fromIso(p.main) <= we) || null;
@@ -672,7 +673,7 @@ function generate(S0, weekStart, now) {
   const fz = (S.frozen || {})[key];
   let frozen = [];
   if (fz && fz.until && Array.isArray(fz.items)) {
-    frozen = fz.items.filter(it => days[it.d]).map(it => { const x = days[it.d]; return { d: it.d, date: x.date, start: it.start, end: it.end, len: it.end - it.start, startT: x.date.getTime() + it.start * 6e4, endT: x.date.getTime() + it.end * 6e4, title: it.title, subj: it.subj, serie: !!it.serie, late: !!it.late, catchup: !!it.catchup, campus: !!it.campus, frozen: true }; });
+    frozen = fz.items.filter(it => days[it.d]).map(it => { const x = days[it.d]; return { d: it.d, date: x.date, start: it.start, end: it.end, len: it.end - it.start, startT: x.date.getTime() + it.start * 6e4, endT: x.date.getTime() + it.end * 6e4, title: it.title, subj: it.subj, serie: !!it.serie, corr: !!it.corr || CORR_T.test(it.title || ''), late: !!it.late, catchup: !!it.catchup, campus: !!it.campus, frozen: true }; });
     const cut = Math.max(fz.until, ...frozen.map(f => f.endT));
     for (let i = slots.length - 1; i >= 0; i--) if (slots[i].startT < cut) slots.splice(i, 1);
   }
@@ -835,7 +836,8 @@ function generate(S0, weekStart, now) {
     const mu = must[su.id] || 0;
     mustLeft[su.id] = Math.max(0, mu - dn);
     // the correction is only done by checking against it: extra time on the série doesn't eat it
-    const corrDone = Object.values(doneMap).filter(v => v && typeof v === 'object' && v.c && v.s === su.id).reduce((a, v) => a + (v.m || 0), 0);
+    // a correction ticked counts as the correction, even when its block had lost its tag
+    const corrDone = Object.values(doneMap).filter(v => v && typeof v === 'object' && v.s === su.id && !v.b && (v.c || (v.serie && CORR_T.test(v.t || '')))).reduce((a, v) => a + (v.m || 0), 0);
     corrLeft[su.id] = Math.max(0, (corr[su.id] || 0) - corrDone);
     mustLeft[su.id] = Math.max(mustLeft[su.id], corrLeft[su.id]);
     // you said where you are in the série: what is left is exactly that, minus what you did since and the sessions ahead
@@ -903,7 +905,8 @@ function generate(S0, weekStart, now) {
     else {
       // block in progress at the moment of the change: keeps its task, which comes off the budgets
       live.push(Object.assign({}, f, { id, state: 'todo' }));
-      if (f.subj && f.serie) { mustLeft[f.subj] = Math.max(0, (mustLeft[f.subj] || 0) - f.len); }
+      if (f.subj && f.corr) { corrLeft[f.subj] = Math.max(0, (corrLeft[f.subj] || 0) - f.len); }
+      else if (f.subj && f.serie) { mustLeft[f.subj] = Math.max(0, (mustLeft[f.subj] || 0) - f.len); }
       else if (f.subj) revLeft[f.subj] = Math.max(0, (revLeft[f.subj] || 0) - f.len);
     }
   }
@@ -1283,7 +1286,7 @@ function freezePast(S, now) {
   const days = generate(S, ws, now);
   const items = [];
   for (const x of days) for (const e of x.ev) if (e.kind === 'study' && !e.fixed && x.date.getTime() + e.start * 6e4 < now.getTime())
-    items.push({ d: x.d, start: e.start, end: e.end, title: e.title, subj: e.subj, serie: e.serie, late: e.late, catchup: e.catchup, campus: /EPFL/.test(e.sub || '') });
+    items.push({ d: x.d, start: e.start, end: e.end, title: e.title, subj: e.subj, serie: e.serie, corr: e.corr || undefined, late: e.late, catchup: e.catchup, campus: /EPFL/.test(e.sub || '') });
   S.frozen = { [key]: { until: now.getTime(), items } };
 }
 

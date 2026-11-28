@@ -351,3 +351,20 @@ console.log('focus OK');
   assert.ok(progSerie(g) > 0 && !g.some(x => x.ev.some(e => e.subj === 'alg' && e.kind === 'study' && e.serie)), 'your word wins, both ways');
   console.log('no série during the project OK');
 }
+{
+  // a correction frozen with the day (mode change…) then ticked: counts as the correction, never planned again
+  const S = L.normalize(L.defaultState()); S.since = new Date(2026, 10, 9).getTime();
+  const ws = L.mondayOf(new Date(2026, 10, 23)), key = L.iso(ws); S.done[key] = {};
+  for (const x of L.generate(S, ws, new Date(2026, 10, 26, 23))) for (const e of x.ev) if (e.kind === 'study' && x.d < 4 && !e.corr) S.done[key][e.id] = { s: e.subj, t: e.title, m: e.end - e.start, d: x.d, a: e.start, serie: e.serie };
+  const fri = new Date(2026, 10, 27, 20), g0 = L.generate(S, ws, fri);
+  const cs = g0.flatMap(x => x.ev.filter(e => e.corr && e.subj === 'phy' && x.d <= 4 && e.state !== 'done'));
+  assert.ok(cs.length, 'a physics correction before Saturday');
+  L.freezePast(S, ws, fri);
+  const g1 = L.generate(S, ws, fri), f = g1.flatMap(x => x.ev.filter(e => e.id === cs[0].id))[0];
+  assert.ok(f && f.corr, 'still a correction once frozen');
+  // one tick as the app makes it now, one as old versions did (no correction tag)
+  for (const e of cs) S.done[key][e.id] = { s: 'phy', t: e.title, m: e.end - e.start, d: 4, a: e.start, serie: true };   // as old versions saved a tick on a frozen block: no correction tag
+  const g2 = L.generate(S, ws, new Date(2026, 10, 28, 8, 39));
+  assert.equal(g2.flatMap(x => x.ev.filter(e => e.corr && e.subj === 'phy' && e.state === 'todo')).length, 0, 'not planned again on Saturday');
+  console.log('frozen correction ticked OK');
+}
