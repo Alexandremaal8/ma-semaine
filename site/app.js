@@ -113,6 +113,8 @@ function save() {
   clearTimeout(syncTimer); syncTimer = setTimeout(syncAll, 2500);
 }
 function syncSoon() { clearTimeout(syncTimer); syncTimer = setTimeout(syncAll, 200); }
+let renewing = false;
+const isPhone = () => standalone() && 'PushManager' in window;
 async function getSub() {
   if (!('serviceWorker' in navigator)) return null;
   const reg = await navigator.serviceWorker.ready;
@@ -132,7 +134,13 @@ async function syncAll() {
   try {
     if (state.widgetToken) { const body = { token: state.widgetToken, mode: MODE_META[cfgOf(iso(mondayOf(new Date()))).mode].name, agenda: L.buildAgenda(state, new Date(), 3) }; if (onceFor('agenda', body, 30)) await post('/agenda', body); }
   } catch (e) { console.warn('agenda', e); }
-  const sub = state.notif.on ? await getSub().catch(() => null) : null;
+  let sub = state.notif.on ? await getSub().catch(() => null) : null;
+  // reminders switched on but this phone lost its subscription (iOS clears it now and then): make it again
+  if (state.notif.on && !sub && isPhone() && 'Notification' in window && Notification.permission === 'granted' && !renewing) {
+    try { renewing = true; const reg = await navigator.serviceWorker.ready; const { publicKey } = await (await fetch(WORKER + '/vapid')).json();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) }); lsSet(LS + '-sent-sync', ''); lsSet(LS + '-notifBroken', ''); }
+    catch (e) { console.warn('resub', e); lsSet(LS + '-notifBroken', '1'); renderToday(); } finally { renewing = false; }
+  } else if (state.notif.on && !sub && isPhone()) { lsSet(LS + '-notifBroken', '1'); renderToday(); }
   if (!sub) {
     // this device has no reminders (e.g. your PC): refresh the reminders of your other devices
     if (syncKey()) { const notifications = L.buildNotifications(state, new Date(), 14); if (onceFor('notifs', notifications, 360)) post('/notifs', { k: syncKey(), notifications }).catch(() => { }); }
@@ -156,7 +164,6 @@ async function syncAll() {
   } catch (e) { console.warn('sync', e); }
 }
 const b64ToBytes = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const b = atob(s); return Uint8Array.from(b, c => c.charCodeAt(0)); };
-let renewing = false;
 async function renewSub(old) {
   if (renewing) return; renewing = true;
   try {
@@ -2192,6 +2199,7 @@ function renderSet() {
   let status;
   if (isIOS && !standalone()) status = `<div class="status"><b>Installe d’abord l’app</b>Pour recevoir des rappels :<ol><li>Ouvre cette page dans <b style="display:inline">Safari</b></li><li>Touche Partager, puis « Sur l’écran d’accueil »</li><li>Ouvre l’app depuis l’icône et reviens ici</li></ol></div>`;
   else if (perm === 'denied') status = `<div class="status"><b>Rappels bloqués</b>Réactive-les dans Réglages iPhone → Notifications → EPFL Calendar.</div>`;
+  else if (N.on && lsGet(LS + '-notifBroken')) status = `<div class="status"><b>Les rappels ne passent plus sur ce téléphone</b>iOS a coupé l’abonnement aux notifs. Un toucher le refait.</div><div class="btns"><button type="button" class="btn pri" data-act="notifFix">Réparer</button></div>`;
   else if (N.on) status = `<div class="status"><b>Rappels activés</b>${sync ? sync.n + ' rappels prévus sur les 14 prochains jours.' : 'Mise à jour en cours…'}</div><div class="btns"><button type="button" class="btn" data-act="testNotif">Tester</button><button type="button" class="btn" data-act="notifOff">Couper</button></div>`;
   else status = `<div class="status"><b>Rappels coupés</b>Reçois un rappel avant tes cours, au début de tes blocs d’étude et avant tes examens.</div><div class="btns"><button type="button" class="btn pri full" data-act="notifOn">Activer les rappels</button></div>`;
   const T = (f, label, sub) => `<label class="row-sw"><span class="bd"><span class="ti">${label}</span>${sub ? `<span class="su">${sub}</span>` : ''}</span><input type="checkbox" class="sw" data-nf="${f}" ${N[f] ? 'checked' : ''}></label>`;
@@ -2442,7 +2450,7 @@ document.addEventListener('click', async e => {
     case 'editSubject': editSubject(v); return;
     case 'notifOn': enableNotifs(); return;
     case 'notifOff': disableNotifs(); return;
-    case 'testNotif': { const sub = await getSub(); if (!sub || !WORKER) { toast('Rappels pas activés'); return; } const r = await post('/test', { subscription: sub.toJSON() }).then(r => r.json()).catch(() => ({})); toast(r.ok ? 'Notif de test envoyée' : 'Échec de l’envoi'); return; }
+    case 'testNotif': { const sub = await getSub(); if (!sub && WORKER) { enableNotifs(true); return; } if (!sub) { toast('Rappels pas activés'); return; } const r = await post('/test', { subscription: sub.toJSON() }).then(r => r.json()).catch(() => ({})); toast(r.ok ? 'Notif de test envoyée' : 'Échec de l’envoi'); return; }
     case 'widgetSheet': widgetSheet(); return;
     case 'syncStart': {
       if (!WORKER) { toast('Serveur pas encore en ligne'); return; }
